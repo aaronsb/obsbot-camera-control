@@ -48,6 +48,7 @@ public:
         bool saturationAuto;
         int saturation;
         int whiteBalance;
+        int whiteBalanceKelvin;
     };
     void applyImagePresetStates(const std::array<ImagePresetState, 3> &presets);
     std::array<ImagePresetState, 3> currentImagePresets() const;

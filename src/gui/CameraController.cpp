@@ -1,5 +1,6 @@
 #include "CameraController.h"
 #include <QThread>
+#include <algorithm>
 
 CameraController::CameraController(QObject *parent)
     : QObject(parent)
@@ -8,10 +9,17 @@ CameraController::CameraController(QObject *parent)
 {
     m_currentState = {};
     m_cachedState = {};
+    m_currentState.whiteBalanceKelvin = 5000;
+    m_cachedState.whiteBalanceKelvin = 5000;
+    m_lastRequestedWhiteBalance = static_cast<int>(Device::DevWhiteBalanceAuto);
+    m_whiteBalanceFallbackActive = false;
+    m_fallbackWhiteBalanceMode = static_cast<int>(Device::DevWhiteBalanceAuto);
 
     // Create settling timer
     m_settlingTimer = new QTimer(this);
     m_settlingTimer->setSingleShot(true);
+
+    resetControlRanges();
 }
 
 CameraController::~CameraController()
@@ -35,12 +43,14 @@ void CameraController::connectToCamera()
                 m_cameraInfo.productType = m_device->productType();
                 m_cameraInfo.connected = true;
 
+                refreshControlRanges();
                 emit cameraConnected(m_cameraInfo);
                 updateState();
             }
         } else {
             m_connected = false;
             m_cameraInfo.connected = false;
+            resetControlRanges();
             emit cameraDisconnected();
         }
     };
@@ -58,12 +68,13 @@ void CameraController::connectToCamera()
 
         m_cameraInfo.name = QString::fromStdString(m_device->devName());
         m_cameraInfo.serialNumber = QString::fromStdString(m_device->devSn());
-        m_cameraInfo.version = QString::fromStdString(m_device->devVersion());
-        m_cameraInfo.productType = m_device->productType();
-        m_cameraInfo.connected = true;
+    m_cameraInfo.version = QString::fromStdString(m_device->devVersion());
+    m_cameraInfo.productType = m_device->productType();
+    m_cameraInfo.connected = true;
 
-        emit cameraConnected(m_cameraInfo);
-        updateState();
+    refreshControlRanges();
+    emit cameraConnected(m_cameraInfo);
+    updateState();
     }
 }
 
@@ -74,6 +85,7 @@ void CameraController::disconnectFromCamera()
         m_device.reset();
         m_connected = false;
         m_cameraInfo.connected = false;
+        resetControlRanges();
 
         emit cameraDisconnected();
     }
@@ -305,9 +317,15 @@ bool CameraController::setBrightness(int value)
         return true;
     }
 
-    return executeCommand("Set Brightness", [this, value]() {
-        return m_device->cameraSetImageBrightnessR(value);
+    int clamped = clampToRange(value, m_brightnessRange, 0, 255);
+    bool success = executeCommand("Set Brightness", [this, clamped]() {
+        return m_device->cameraSetImageBrightnessR(clamped);
     });
+    if (success) {
+        m_currentState.brightness = clamped;
+        emit stateChanged(m_currentState);
+    }
+    return success;
 }
 
 bool CameraController::setContrast(int value)
@@ -319,9 +337,15 @@ bool CameraController::setContrast(int value)
         return true;
     }
 
-    return executeCommand("Set Contrast", [this, value]() {
-        return m_device->cameraSetImageContrastR(value);
+    int clamped = clampToRange(value, m_contrastRange, 0, 255);
+    bool success = executeCommand("Set Contrast", [this, clamped]() {
+        return m_device->cameraSetImageContrastR(clamped);
     });
+    if (success) {
+        m_currentState.contrast = clamped;
+        emit stateChanged(m_currentState);
+    }
+    return success;
 }
 
 bool CameraController::setSaturation(int value)
@@ -333,20 +357,88 @@ bool CameraController::setSaturation(int value)
         return true;
     }
 
-    return executeCommand("Set Saturation", [this, value]() {
-        return m_device->cameraSetImageSaturationR(value);
+    int clamped = clampToRange(value, m_saturationRange, 0, 255);
+    bool success = executeCommand("Set Saturation", [this, clamped]() {
+        return m_device->cameraSetImageSaturationR(clamped);
     });
+    if (success) {
+        m_currentState.saturation = clamped;
+        emit stateChanged(m_currentState);
+    }
+    return success;
 }
 
 bool CameraController::setWhiteBalance(int mode)
 {
     if (!m_connected) return false;
 
-    return executeCommand("Set White Balance", [this, mode]() {
-        // Map our mode to SDK enum
-        Device::DevWhiteBalanceType wbType = static_cast<Device::DevWhiteBalanceType>(mode);
-        return m_device->cameraSetWhiteBalanceR(wbType, 0);  // param=0 for preset modes
-    });
+    m_lastRequestedWhiteBalance = mode;
+
+    if (mode == static_cast<int>(Device::DevWhiteBalanceManual)) {
+        m_whiteBalanceFallbackActive = false;
+        m_fallbackWhiteBalanceMode = mode;
+        return applyManualWhiteBalance(m_currentState.whiteBalanceKelvin, mode);
+    }
+
+    if (mode == static_cast<int>(Device::DevWhiteBalanceAuto)) {
+        m_whiteBalanceFallbackActive = false;
+        m_fallbackWhiteBalanceMode = mode;
+        bool success = executeCommand("Set White Balance", [this]() {
+            return m_device->cameraSetWhiteBalanceR(Device::DevWhiteBalanceAuto, 0);
+        });
+        if (success) {
+            m_currentState.whiteBalance = mode;
+            if (m_whiteBalanceKelvinRange.valid) {
+                m_currentState.whiteBalanceKelvin = clampToRange(m_whiteBalanceKelvinRange.defaultValue, m_whiteBalanceKelvinRange, 2000, 10000);
+            }
+            emit stateChanged(m_currentState);
+        }
+        return success;
+    }
+
+    auto wbType = static_cast<Device::DevWhiteBalanceType>(mode);
+    bool attemptDirect = m_supportedWhiteBalanceTypes.empty() ||
+        isWhiteBalanceTypeSupported(mode);
+    bool success = false;
+
+    if (attemptDirect) {
+        success = executeCommand("Set White Balance", [this, wbType]() {
+            return m_device->cameraSetWhiteBalanceR(wbType, 0);
+        });
+
+        if (success) {
+            Device::DevWhiteBalanceType readType;
+            int32_t readParam = 0;
+            if (m_device->cameraGetWhiteBalanceR(readType, readParam) == 0 && readType == wbType) {
+                m_whiteBalanceFallbackActive = false;
+                m_fallbackWhiteBalanceMode = mode;
+                m_currentState.whiteBalance = mode;
+                if (m_whiteBalanceKelvinRange.valid) {
+                    m_currentState.whiteBalanceKelvin = clampToRange(readParam, m_whiteBalanceKelvinRange, 2000, 10000);
+                }
+                emit stateChanged(m_currentState);
+                return true;
+            }
+        }
+    }
+
+    int kelvin = whiteBalancePresetToKelvin(mode);
+    if (kelvin > 0 && m_whiteBalanceKelvinRange.valid) {
+        m_whiteBalanceFallbackActive = true;
+        m_fallbackWhiteBalanceMode = mode;
+        return applyManualWhiteBalance(kelvin, mode);
+    }
+
+    return success;
+}
+bool CameraController::setWhiteBalanceManual(int kelvin)
+{
+    if (!m_connected) return false;
+
+    m_lastRequestedWhiteBalance = static_cast<int>(Device::DevWhiteBalanceManual);
+    m_whiteBalanceFallbackActive = false;
+    m_fallbackWhiteBalanceMode = static_cast<int>(Device::DevWhiteBalanceManual);
+    return applyManualWhiteBalance(kelvin, static_cast<int>(Device::DevWhiteBalanceManual));
 }
 
 bool CameraController::executeCommand(const QString &description, std::function<int32_t()> command)
@@ -394,22 +486,33 @@ void CameraController::updateState()
     int32_t wbParam;
 
     if (m_device->cameraGetImageBrightnessR(brightness) == 0) {
-        m_currentState.brightness = brightness;
+        m_currentState.brightness = clampToRange(brightness, m_brightnessRange, 0, 255);
     }
     if (m_device->cameraGetImageContrastR(contrast) == 0) {
-        m_currentState.contrast = contrast;
+        m_currentState.contrast = clampToRange(contrast, m_contrastRange, 0, 255);
     }
     if (m_device->cameraGetImageSaturationR(saturation) == 0) {
-        m_currentState.saturation = saturation;
+        m_currentState.saturation = clampToRange(saturation, m_saturationRange, 0, 255);
     }
     if (m_device->cameraGetWhiteBalanceR(wbType, wbParam) == 0) {
         m_currentState.whiteBalance = static_cast<int>(wbType);
+        if (wbType == Device::DevWhiteBalanceManual) {
+            m_currentState.whiteBalanceKelvin = clampToRange(wbParam, m_whiteBalanceKelvinRange, 2000, 10000);
+        } else if (m_whiteBalanceKelvinRange.valid) {
+            m_currentState.whiteBalanceKelvin = clampToRange(m_whiteBalanceKelvinRange.defaultValue, m_whiteBalanceKelvinRange, 2000, 10000);
+        }
     }
 
     // Restore auto mode flags (not stored in camera)
     m_currentState.brightnessAuto = preservedBrightnessAuto;
     m_currentState.contrastAuto = preservedContrastAuto;
     m_currentState.saturationAuto = preservedSaturationAuto;
+
+    if (m_whiteBalanceFallbackActive) {
+        m_currentState.whiteBalance = m_fallbackWhiteBalanceMode;
+    } else {
+        m_lastRequestedWhiteBalance = m_currentState.whiteBalance;
+    }
 
     emit stateChanged(m_currentState);
 }
@@ -464,7 +567,11 @@ void CameraController::applyConfigToCamera()
     setBrightness(settings.brightness);
     setContrast(settings.contrast);
     setSaturation(settings.saturation);
-    setWhiteBalance(settings.whiteBalance);
+    if (settings.whiteBalance == static_cast<int>(Device::DevWhiteBalanceManual)) {
+        setWhiteBalanceManual(settings.whiteBalanceKelvin);
+    } else {
+        setWhiteBalance(settings.whiteBalance);
+    }
 
     emit configLoaded();
 }
@@ -503,7 +610,11 @@ void CameraController::applyCurrentStateToCamera(const CameraState &uiState)
     setBrightness(uiState.brightness);
     setContrast(uiState.contrast);
     setSaturation(uiState.saturation);
-    setWhiteBalance(uiState.whiteBalance);
+    if (uiState.whiteBalance == static_cast<int>(Device::DevWhiteBalanceManual)) {
+        setWhiteBalanceManual(uiState.whiteBalanceKelvin);
+    } else {
+        setWhiteBalance(uiState.whiteBalance);
+    }
 }
 
 void CameraController::saveCurrentStateToConfig()
@@ -534,6 +645,7 @@ void CameraController::saveCurrentStateToConfig()
     settings.saturationAuto = m_currentState.saturationAuto;
     settings.saturation = m_currentState.saturation;
     settings.whiteBalance = m_currentState.whiteBalance;
+    settings.whiteBalanceKelvin = m_currentState.whiteBalanceKelvin;
 
     m_config.setSettings(settings);
 }
@@ -543,4 +655,147 @@ bool CameraController::isTiny2Family() const
     return m_cameraInfo.productType == ObsbotProdTiny2 ||
            m_cameraInfo.productType == ObsbotProdTiny2Lite ||
            m_cameraInfo.productType == ObsbotProdTinySE;
+}
+
+void CameraController::refreshControlRanges()
+{
+    if (!m_device) {
+        resetControlRanges();
+        return;
+    }
+
+    auto fetchRange = [this](int32_t (Device::*getter)(Device::UvcParamRange &), ParamRange &target) {
+        Device::UvcParamRange sdkRange{};
+        if ((m_device.get()->*getter)(sdkRange) == 0) {
+            target.min = sdkRange.min_;
+            target.max = sdkRange.max_;
+            target.step = sdkRange.step_ == 0 ? 1 : sdkRange.step_;
+            target.defaultValue = sdkRange.default_;
+            target.valid = true;
+        } else {
+            target = {};
+        }
+    };
+
+    fetchRange(&Device::cameraGetRangeImageBrightnessR, m_brightnessRange);
+    fetchRange(&Device::cameraGetRangeImageContrastR, m_contrastRange);
+    fetchRange(&Device::cameraGetRangeImageSaturationR, m_saturationRange);
+    fetchRange(&Device::cameraGetRangeWhiteBalanceR, m_whiteBalanceKelvinRange);
+
+    m_supportedWhiteBalanceTypes.clear();
+    std::vector<int32_t> wbList;
+    int32_t wbMin = 0;
+    int32_t wbMax = 0;
+    if (m_device->cameraGetWhiteBalanceListR(wbList, wbMin, wbMax) == 0) {
+        m_supportedWhiteBalanceTypes.assign(wbList.begin(), wbList.end());
+    }
+
+    if (m_whiteBalanceKelvinRange.valid) {
+        int clampedCurrent = clampToRange(
+            m_currentState.whiteBalanceKelvin == 0 ? m_whiteBalanceKelvinRange.defaultValue : m_currentState.whiteBalanceKelvin,
+            m_whiteBalanceKelvinRange, 2000, 10000);
+        m_currentState.whiteBalanceKelvin = clampedCurrent;
+        m_cachedState.whiteBalanceKelvin = clampToRange(
+            m_cachedState.whiteBalanceKelvin == 0 ? m_whiteBalanceKelvinRange.defaultValue : m_cachedState.whiteBalanceKelvin,
+            m_whiteBalanceKelvinRange, 2000, 10000);
+    }
+}
+
+void CameraController::resetControlRanges()
+{
+    m_brightnessRange = {};
+    m_contrastRange = {};
+    m_saturationRange = {};
+    m_whiteBalanceKelvinRange = {};
+    m_supportedWhiteBalanceTypes.clear();
+    m_whiteBalanceFallbackActive = false;
+    m_fallbackWhiteBalanceMode = static_cast<int>(Device::DevWhiteBalanceAuto);
+}
+
+int CameraController::clampToRange(int value, const ParamRange &range, int fallbackMin, int fallbackMax) const
+{
+    if (range.valid && range.min <= range.max) {
+        return std::clamp(value, range.min, range.max);
+    }
+    return std::clamp(value, fallbackMin, fallbackMax);
+}
+
+int CameraController::whiteBalancePresetToKelvin(int mode) const
+{
+    switch (mode) {
+    case static_cast<int>(Device::DevWhiteBalanceDaylight):
+        return 5500;
+    case static_cast<int>(Device::DevWhiteBalanceFluorescent):
+        return 4200;
+    case static_cast<int>(Device::DevWhiteBalanceTungsten):
+        return 3200;
+    case static_cast<int>(Device::DevWhiteBalanceFlash):
+        return 6000;
+    case static_cast<int>(Device::DevWhiteBalanceFine):
+        return 5000;
+    case static_cast<int>(Device::DevWhiteBalanceCloudy):
+        return 6500;
+    case static_cast<int>(Device::DevWhiteBalanceShade):
+        return 7500;
+    case static_cast<int>(Device::DevWhiteBalanceDayLightFluorescent):
+        return 5000;
+    case static_cast<int>(Device::DevWhiteBalanceDayWhiteFluorescent):
+        return 4500;
+    case static_cast<int>(Device::DevWhiteBalanceCoolWhiteFluorescent):
+        return 4000;
+    case static_cast<int>(Device::DevWhiteBalanceWhiteFluorescent):
+        return 3600;
+    case static_cast<int>(Device::DevWhiteBalanceWarmWhiteFluorescent):
+        return 3000;
+    case static_cast<int>(Device::DevWhiteBalanceStandardLightA):
+        return 2850;
+    case static_cast<int>(Device::DevWhiteBalanceStandardLightB):
+        return 3200;
+    case static_cast<int>(Device::DevWhiteBalanceStandardLightC):
+        return 6500;
+    case static_cast<int>(Device::DevWhiteBalance55):
+        return 5500;
+    case static_cast<int>(Device::DevWhiteBalance65):
+        return 6500;
+    case static_cast<int>(Device::DevWhiteBalanceD75):
+        return 7500;
+    case static_cast<int>(Device::DevWhiteBalanceD50):
+        return 5000;
+    case static_cast<int>(Device::DevWhiteBalanceIsoStudioTungsten):
+        return 3200;
+    default:
+        return 0;
+    }
+}
+
+bool CameraController::applyManualWhiteBalance(int kelvin, int displayMode)
+{
+    int clamped = clampToRange(kelvin, m_whiteBalanceKelvinRange, 2000, 10000);
+    bool success = executeCommand("Set White Balance (Manual)", [this, clamped]() {
+        return m_device->cameraSetWhiteBalanceR(Device::DevWhiteBalanceManual, clamped);
+    });
+
+    if (success) {
+        m_lastRequestedWhiteBalance = displayMode;
+        m_currentState.whiteBalance = displayMode;
+        m_currentState.whiteBalanceKelvin = clamped;
+        emit stateChanged(m_currentState);
+    }
+
+    return success;
+}
+
+bool CameraController::isWhiteBalanceTypeSupported(int mode) const
+{
+    if (mode == static_cast<int>(Device::DevWhiteBalanceAuto) ||
+        mode == static_cast<int>(Device::DevWhiteBalanceManual)) {
+        return true;
+    }
+
+    if (m_supportedWhiteBalanceTypes.empty()) {
+        return false;
+    }
+
+    return std::find(m_supportedWhiteBalanceTypes.begin(), m_supportedWhiteBalanceTypes.end(), mode)
+        != m_supportedWhiteBalanceTypes.end();
 }

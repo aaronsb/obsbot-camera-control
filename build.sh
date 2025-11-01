@@ -381,6 +381,19 @@ do_build() {
 
     cd "$BUILD_DIR"
 
+    if [ -f "CMakeCache.txt" ]; then
+        CACHE_HOME=$(grep -m1 '^CMAKE_HOME_DIRECTORY:INTERNAL=' CMakeCache.txt | cut -d'=' -f2-)
+        SOURCE_HOME=$(cd .. && pwd)
+        if [ -n "$CACHE_HOME" ] && [ "$CACHE_HOME" != "$SOURCE_HOME" ]; then
+            print_msg "$YELLOW" "Detected stale CMake cache from: $CACHE_HOME"
+            print_msg "$BLUE" "Cleaning $BUILD_DIR/ to regenerate build files..."
+            cd ..
+            rm -rf "$BUILD_DIR"
+            mkdir -p "$BUILD_DIR"
+            cd "$BUILD_DIR"
+        fi
+    fi
+
     print_msg "$BLUE" "Running CMake..."
     cmake ..
 
@@ -461,6 +474,10 @@ do_install() {
         print_msg "$NC" "You can run the applications from anywhere:"
         print_msg "$BLUE" "  obsbot-gui"
     fi
+
+    print_msg "$BLUE" "\n==> Virtual camera support is available but not enabled"
+    print_msg "$BLUE" "==> To enable: sudo systemctl enable --now obsbot-virtual-camera.service"
+    print_msg "$BLUE" "==> Or load manually: sudo modprobe v4l2loopback video_nr=42 card_label=\"OBSBOT Virtual Camera\" exclusive_caps=1"
 }
 
 # Clean build directory

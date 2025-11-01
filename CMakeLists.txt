@@ -14,7 +14,7 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_DEBUG ${CMAKE_SOURCE_DIR}/bin)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_RELEASE ${CMAKE_SOURCE_DIR}/bin)
 
 # Find Qt6
-find_package(Qt6 REQUIRED COMPONENTS Widgets Multimedia MultimediaWidgets)
+find_package(Qt6 REQUIRED COMPONENTS Widgets Multimedia MultimediaWidgets OpenGLWidgets)
 
 # SDK paths
 set(SDK_INCLUDE_DIR ${CMAKE_SOURCE_DIR}/sdk/include)
@@ -33,8 +33,12 @@ add_executable(obsbot-gui
     src/gui/PTZControlWidget.h
     src/gui/CameraSettingsWidget.cpp
     src/gui/CameraSettingsWidget.h
+    src/gui/FilterPreviewWidget.cpp
+    src/gui/FilterPreviewWidget.h
     src/gui/CameraPreviewWidget.cpp
     src/gui/CameraPreviewWidget.h
+    src/gui/VideoEffectsWidget.cpp
+    src/gui/VideoEffectsWidget.h
     src/gui/VirtualCameraStreamer.cpp
     src/gui/VirtualCameraStreamer.h
     src/gui/PreviewWindow.cpp
@@ -57,6 +61,7 @@ target_link_libraries(obsbot-gui PRIVATE
     Qt6::Widgets
     Qt6::Multimedia
     Qt6::MultimediaWidgets
+    Qt6::OpenGLWidgets
     dev
 )
 

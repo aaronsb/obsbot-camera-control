@@ -70,6 +70,9 @@ sudo dnf install lsof
 This enables the application to detect when other programs are using the camera.
 
 #### Virtual Camera Output (Optional)
+The project ships a systemd unit and modprobe configuration, but they are not enabled automatically. Enable them only if you want a persistent virtual camera device.
+
+Install the kernel module for your distribution:
 ```bash
 # Arch
 sudo pacman -S v4l2loopback-dkms v4l-utils
@@ -81,9 +84,12 @@ sudo apt install v4l2loopback-dkms v4l2loopback-utils v4l-utils
 sudo dnf install v4l2loopback v4l-utils
 ```
 
-Load the module after installation:
-
+Load the module when you want to expose the virtual camera:
 ```bash
+# using the provided systemd unit (installs the module options from /usr/lib/modprobe.d/)
+sudo systemctl enable --now obsbot-virtual-camera.service
+
+# or load it manually
 sudo modprobe v4l2loopback video_nr=42 card_label="OBSBOT Virtual Camera" exclusive_caps=1
 ```
 

@@ -14,6 +14,7 @@
 #include "PTZControlWidget.h"
 #include "CameraSettingsWidget.h"
 #include "CameraPreviewWidget.h"
+#include "VideoEffectsWidget.h"
 
 class PreviewWindow;
 class QSplitter;
@@ -22,6 +23,7 @@ class QTabWidget;
 class QFrame;
 class QWidget;
 class QLineEdit;
+class QComboBox;
 class VirtualCameraStreamer;
 
 /**
@@ -57,7 +59,9 @@ private slots:
     void onPreviewWindowClosed();
     void onVirtualCameraToggled(bool enabled);
     void onVirtualCameraDeviceEdited();
+    void onVirtualCameraResolutionChanged(int index);
     void onVirtualCameraError(const QString &message);
+    void onVideoEffectsChanged(const FilterPreviewWidget::VideoEffectsSettings &settings);
 
 private:
     void setupUI();
@@ -72,6 +76,8 @@ private:
     void attachPreviewToPanel();
     void updatePreviewControls();
     void updateStatusBanner(bool connected);
+    QString currentVirtualCameraDevicePath() const;
+    void updateVirtualCameraAvailability(const QString &devicePath);
     void updateVirtualCameraStreamerState();
 
     // Controller
@@ -96,11 +102,14 @@ private:
     QHBoxLayout *m_mainLayout;
     QCheckBox *m_virtualCameraCheckbox;
     QLineEdit *m_virtualCameraDeviceEdit;
+    QComboBox *m_virtualCameraResolutionCombo;
+    QLabel *m_virtualCameraStatusLabel;
 
     // Control widgets
     TrackingControlWidget *m_trackingWidget;
     PTZControlWidget *m_ptzWidget;
     CameraSettingsWidget *m_settingsWidget;
+    VideoEffectsWidget *m_effectsWidget;
     CameraPreviewWidget *m_previewWidget;
     PreviewWindow *m_previewWindow;
     VirtualCameraStreamer *m_virtualCameraStreamer;
@@ -115,6 +124,7 @@ private:
     int m_dockedMinWidth;
     int m_previewCardMinWidth;
     int m_previewCardMaxWidth;
+    QSize m_lastDockedSize;
 
     // System tray
     QSystemTrayIcon *m_trayIcon;
@@ -122,11 +132,13 @@ private:
 
     bool m_isApplyingStyle;
     bool m_virtualCameraErrorNotified;
+    bool m_virtualCameraAvailable;
 
 protected:
     bool event(QEvent *event) override;
     void changeEvent(QEvent *event) override;
     void closeEvent(QCloseEvent *event) override;
+    void resizeEvent(QResizeEvent *event) override;
 };
 
 #endif // MAINWINDOW_H

@@ -5,8 +5,10 @@
 #include <QCheckBox>
 #include <QComboBox>
 #include <QGroupBox>
+#include <QLabel>
 #include <QSlider>
 #include <QTimer>
+#include <algorithm>
 #include "CameraController.h"
 
 /**
@@ -33,7 +35,8 @@ public:
     int getContrast() const { return m_contrastSlider->value(); }
     bool isSaturationAuto() const { return m_saturationAutoCheckBox->isChecked(); }
     int getSaturation() const { return m_saturationSlider->value(); }
-    int getWhiteBalance() const { return m_whiteBalanceComboBox->currentIndex(); }
+    int getWhiteBalance() const { return m_whiteBalanceComboBox->currentData().toInt(); }
+    int getWhiteBalanceKelvin() const { return m_whiteBalanceKelvinSlider->value(); }
 
     // Setters for initializing from config
     void setHDREnabled(bool enabled) {
@@ -91,8 +94,20 @@ public:
     }
     void setWhiteBalance(int value) {
         m_whiteBalanceComboBox->blockSignals(true);
-        m_whiteBalanceComboBox->setCurrentIndex(value);
+        int index = m_whiteBalanceComboBox->findData(value);
+        if (index >= 0) {
+            m_whiteBalanceComboBox->setCurrentIndex(index);
+        }
         m_whiteBalanceComboBox->blockSignals(false);
+        applyControlRanges();
+        updateWhiteBalanceControls(value);
+    }
+    void setWhiteBalanceKelvin(int kelvin) {
+        m_whiteBalanceKelvinSlider->blockSignals(true);
+        int clamped = std::clamp(kelvin, m_whiteBalanceKelvinSlider->minimum(), m_whiteBalanceKelvinSlider->maximum());
+        m_whiteBalanceKelvinSlider->setValue(clamped);
+        m_whiteBalanceKelvinSlider->blockSignals(false);
+        updateWhiteBalanceKelvinLabel(clamped);
     }
 
 private slots:
@@ -107,6 +122,7 @@ private slots:
     void onSaturationAutoToggled(bool checked);
     void onSaturationChanged(int value);
     void onWhiteBalanceChanged(int index);
+    void onWhiteBalanceKelvinChanged(int value);
 
 private:
     CameraController *m_controller;
@@ -124,9 +140,19 @@ private:
     QCheckBox *m_saturationAutoCheckBox;
     QSlider *m_saturationSlider;
     QComboBox *m_whiteBalanceComboBox;
+    QSlider *m_whiteBalanceKelvinSlider;
+    QLabel *m_whiteBalanceKelvinLabel;
 
     bool m_userInitiated;  // Track if change was user-initiated
     QTimer *m_commandTimer;  // Debounce timer for command completion
+    bool m_brightnessRangeApplied = false;
+    bool m_contrastRangeApplied = false;
+    bool m_saturationRangeApplied = false;
+    bool m_whiteBalanceRangeApplied = false;
+
+    void applyControlRanges();
+    void updateWhiteBalanceControls(int mode);
+    void updateWhiteBalanceKelvinLabel(int value);
 };
 
 #endif // CAMERASETTINGSWIDGET_H

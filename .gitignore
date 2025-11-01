@@ -36,6 +36,9 @@ Makefile
 # Config files (user-specific)
 *.conf
 
+# Config assets bundled with the app
+!resources/**/*.conf
+
 # Temporary files
 *~
 *.swp

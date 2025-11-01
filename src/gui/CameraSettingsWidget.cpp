@@ -2,6 +2,7 @@
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <algorithm>
 
 CameraSettingsWidget::CameraSettingsWidget(CameraController *controller, QWidget *parent)
     : QWidget(parent)
@@ -106,20 +107,37 @@ CameraSettingsWidget::CameraSettingsWidget(CameraController *controller, QWidget
     QHBoxLayout *wbLayout = new QHBoxLayout();
     wbLayout->addWidget(new QLabel("White Balance:", this));
     m_whiteBalanceComboBox = new QComboBox(this);
-    m_whiteBalanceComboBox->addItem("Auto", 0);
-    m_whiteBalanceComboBox->addItem("Daylight", 1);
-    m_whiteBalanceComboBox->addItem("Fluorescent", 2);
-    m_whiteBalanceComboBox->addItem("Tungsten", 3);
-    m_whiteBalanceComboBox->addItem("Flash", 4);
-    m_whiteBalanceComboBox->addItem("Fine", 5);
-    m_whiteBalanceComboBox->addItem("Cloudy", 6);
-    m_whiteBalanceComboBox->addItem("Shade", 7);
+    m_whiteBalanceComboBox->addItem("Auto", static_cast<int>(Device::DevWhiteBalanceAuto));
+    m_whiteBalanceComboBox->addItem("Daylight", static_cast<int>(Device::DevWhiteBalanceDaylight));
+    m_whiteBalanceComboBox->addItem("Fluorescent", static_cast<int>(Device::DevWhiteBalanceFluorescent));
+    m_whiteBalanceComboBox->addItem("Tungsten", static_cast<int>(Device::DevWhiteBalanceTungsten));
+    m_whiteBalanceComboBox->addItem("Flash", static_cast<int>(Device::DevWhiteBalanceFlash));
+    m_whiteBalanceComboBox->addItem("Fine", static_cast<int>(Device::DevWhiteBalanceFine));
+    m_whiteBalanceComboBox->addItem("Cloudy", static_cast<int>(Device::DevWhiteBalanceCloudy));
+    m_whiteBalanceComboBox->addItem("Shade", static_cast<int>(Device::DevWhiteBalanceShade));
+    m_whiteBalanceComboBox->addItem("Manual (Kelvin)", static_cast<int>(Device::DevWhiteBalanceManual));
     m_whiteBalanceComboBox->setToolTip("Adjust white balance for lighting conditions");
     connect(m_whiteBalanceComboBox, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, &CameraSettingsWidget::onWhiteBalanceChanged);
     wbLayout->addWidget(m_whiteBalanceComboBox);
     wbLayout->addStretch();
     imageLayout->addLayout(wbLayout);
+
+    QHBoxLayout *wbKelvinLayout = new QHBoxLayout();
+    wbKelvinLayout->setContentsMargins(20, 0, 0, 0);
+    wbKelvinLayout->setSpacing(8);
+    m_whiteBalanceKelvinSlider = new QSlider(Qt::Horizontal, this);
+    m_whiteBalanceKelvinSlider->setRange(2000, 10000);
+    m_whiteBalanceKelvinSlider->setSingleStep(100);
+    m_whiteBalanceKelvinSlider->setEnabled(false);
+    m_whiteBalanceKelvinSlider->setValue(5000);
+    connect(m_whiteBalanceKelvinSlider, &QSlider::valueChanged,
+            this, &CameraSettingsWidget::onWhiteBalanceKelvinChanged);
+    wbKelvinLayout->addWidget(m_whiteBalanceKelvinSlider, 1);
+    m_whiteBalanceKelvinLabel = new QLabel("5000 K", this);
+    m_whiteBalanceKelvinLabel->setEnabled(false);
+    wbKelvinLayout->addWidget(m_whiteBalanceKelvinLabel);
+    imageLayout->addLayout(wbKelvinLayout);
 
     layout->addWidget(imageGroupBox);
     layout->addStretch();
@@ -212,13 +230,35 @@ void CameraSettingsWidget::onSaturationChanged(int value)
 
 void CameraSettingsWidget::onWhiteBalanceChanged(int index)
 {
+    Q_UNUSED(index);
+    const int mode = m_whiteBalanceComboBox->currentData().toInt();
+    updateWhiteBalanceControls(mode);
+
     m_userInitiated = true;
-    m_controller->setWhiteBalance(index);
+    if (mode == static_cast<int>(Device::DevWhiteBalanceManual)) {
+        m_controller->setWhiteBalanceManual(m_whiteBalanceKelvinSlider->value());
+    } else {
+        m_controller->setWhiteBalance(mode);
+    }
+    m_commandTimer->start(1000);
+}
+
+void CameraSettingsWidget::onWhiteBalanceKelvinChanged(int value)
+{
+    updateWhiteBalanceKelvinLabel(value);
+    if (m_whiteBalanceComboBox->currentData().toInt() != static_cast<int>(Device::DevWhiteBalanceManual)) {
+        return;
+    }
+
+    m_userInitiated = true;
+    m_controller->setWhiteBalanceManual(value);
     m_commandTimer->start(1000);
 }
 
 void CameraSettingsWidget::updateFromState(const CameraController::CameraState &state)
 {
+    applyControlRanges();
+
     // Only update if state differs, not user-initiated, command timer expired, and not settling
     bool commandInFlight = m_commandTimer->isActive();
     bool isSettling = m_controller->isSettling();
@@ -291,16 +331,90 @@ void CameraSettingsWidget::updateFromState(const CameraController::CameraState &
             m_saturationSlider->setValue(state.saturation);
             m_saturationSlider->blockSignals(false);
         }
+    }
 
-        if (m_whiteBalanceComboBox->currentIndex() != state.whiteBalance) {
-            m_whiteBalanceComboBox->blockSignals(true);
-            m_whiteBalanceComboBox->setCurrentIndex(state.whiteBalance);
-            m_whiteBalanceComboBox->blockSignals(false);
+    int desiredWbIndex = m_whiteBalanceComboBox->findData(state.whiteBalance);
+    if (!m_userInitiated && !commandInFlight && !isSettling && desiredWbIndex >= 0 &&
+        m_whiteBalanceComboBox->currentIndex() != desiredWbIndex) {
+        m_whiteBalanceComboBox->blockSignals(true);
+        m_whiteBalanceComboBox->setCurrentIndex(desiredWbIndex);
+        m_whiteBalanceComboBox->blockSignals(false);
+    }
+
+    updateWhiteBalanceControls(state.whiteBalance);
+
+    if (!m_userInitiated && !commandInFlight && !isSettling) {
+        int clampedKelvin = std::clamp(state.whiteBalanceKelvin,
+            m_whiteBalanceKelvinSlider->minimum(), m_whiteBalanceKelvinSlider->maximum());
+        if (m_whiteBalanceKelvinSlider->value() != clampedKelvin) {
+            m_whiteBalanceKelvinSlider->blockSignals(true);
+            m_whiteBalanceKelvinSlider->setValue(clampedKelvin);
+            m_whiteBalanceKelvinSlider->blockSignals(false);
         }
     }
+    updateWhiteBalanceKelvinLabel(m_whiteBalanceKelvinSlider->value());
 
     // Clear user-initiated flag when command timer expires
     if (!commandInFlight && m_userInitiated) {
         m_userInitiated = false;
+    }
+}
+
+void CameraSettingsWidget::applyControlRanges()
+{
+    if (!m_controller) {
+        return;
+    }
+
+    const auto applyRange = [](const CameraController::ParamRange &range, QSlider *slider, bool &applied, const QString &tooltip) {
+        if (!slider || !range.valid) {
+            return;
+        }
+        const int step = std::max(1, range.step);
+        const bool rangeChanged = !applied || slider->minimum() != range.min || slider->maximum() != range.max;
+        if (rangeChanged) {
+            int value = std::clamp(slider->value(), range.min, range.max);
+            slider->blockSignals(true);
+            slider->setRange(range.min, range.max);
+            slider->setSingleStep(step);
+            slider->setPageStep(step * 5);
+            slider->setValue(value);
+            slider->blockSignals(false);
+            applied = true;
+        } else {
+            slider->setSingleStep(step);
+            slider->setPageStep(step * 5);
+        }
+        slider->setToolTip(tooltip.arg(range.min).arg(range.max));
+    };
+
+    applyRange(m_controller->getBrightnessRange(), m_brightnessSlider, m_brightnessRangeApplied,
+               QStringLiteral("Adjust image brightness (%1-%2)"));
+    applyRange(m_controller->getContrastRange(), m_contrastSlider, m_contrastRangeApplied,
+               QStringLiteral("Adjust image contrast (%1-%2)"));
+    applyRange(m_controller->getSaturationRange(), m_saturationSlider, m_saturationRangeApplied,
+               QStringLiteral("Adjust color saturation (%1-%2)"));
+
+    const auto wbRange = m_controller->getWhiteBalanceKelvinRange();
+    if (wbRange.valid) {
+        applyRange(wbRange, m_whiteBalanceKelvinSlider, m_whiteBalanceRangeApplied,
+                   QStringLiteral("Manual color temperature (%1-%2 K)"));
+        updateWhiteBalanceKelvinLabel(m_whiteBalanceKelvinSlider->value());
+    }
+}
+
+void CameraSettingsWidget::updateWhiteBalanceControls(int mode)
+{
+    const bool manualSelected = (mode == static_cast<int>(Device::DevWhiteBalanceManual));
+    const bool rangeAvailable = m_controller->getWhiteBalanceKelvinRange().valid;
+    const bool enableManual = manualSelected && rangeAvailable;
+    m_whiteBalanceKelvinSlider->setEnabled(enableManual);
+    m_whiteBalanceKelvinLabel->setEnabled(enableManual);
+}
+
+void CameraSettingsWidget::updateWhiteBalanceKelvinLabel(int value)
+{
+    if (m_whiteBalanceKelvinLabel) {
+        m_whiteBalanceKelvinLabel->setText(QString::number(value) + QStringLiteral(" K"));
     }
 }

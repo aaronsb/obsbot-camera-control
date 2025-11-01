@@ -61,6 +61,7 @@ public:
         bool saturationAuto;  // Auto mode for saturation
         int saturation;       // Typically 0-255 or similar range
         int whiteBalance;     // 0=Auto, 1=Daylight, 2=Fluorescent, etc.
+        int whiteBalanceKelvin; // Manual Kelvin value (when whiteBalance==255)
 
         // Audio
         bool audioAutoGain;   // Enable auto gain control for microphones
@@ -74,6 +75,7 @@ public:
         bool startMinimized;  // Start application minimized to tray
         bool virtualCameraEnabled;
         std::string virtualCameraDevice;
+        std::string virtualCameraResolution;
     };
 
     Config();

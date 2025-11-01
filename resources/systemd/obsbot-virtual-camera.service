@@ -1,0 +1,16 @@
+[Unit]
+Description=OBSBOT Virtual Camera (v4l2loopback)
+Documentation=https://github.com/aaronsb/obsbot-camera-control
+DefaultDependencies=no
+After=systemd-modules-load.service
+Before=multi-user.target
+ConditionKernelCommandLine=!nomodules
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/modprobe v4l2loopback
+ExecStop=/usr/bin/modprobe -r v4l2loopback
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

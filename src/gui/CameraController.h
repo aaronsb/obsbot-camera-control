@@ -5,6 +5,7 @@
 #include <QTimer>
 #include <memory>
 #include <functional>
+#include <vector>
 #include <dev/devs.hpp>
 #include "Config.h"
 
@@ -56,10 +57,19 @@ public:
         bool saturationAuto; // Auto mode for saturation
         int saturation;      // 0-255
         int whiteBalance;    // 0=Auto, 1=Daylight, etc.
+        int whiteBalanceKelvin; // Manual Kelvin value when white balance is manual
 
         // Status
         int zoomRatio;
         int devStatus;
+    };
+
+    struct ParamRange {
+        int min = 0;
+        int max = 0;
+        int step = 1;
+        int defaultValue = 0;
+        bool valid = false;
     };
 
     explicit CameraController(QObject *parent = nullptr);
@@ -103,6 +113,7 @@ public:
     void setSaturationAuto(bool enabled) { m_currentState.saturationAuto = enabled; }
     bool setSaturation(int value);  // 0-255
     bool setWhiteBalance(int mode); // 0=Auto, 1=Daylight, etc.
+    bool setWhiteBalanceManual(int kelvin);
 
     // Configuration
     bool loadConfig(std::vector<Config::ValidationError> &errors);
@@ -114,6 +125,13 @@ public:
     // Settling state
     bool isSettling() const { return m_settlingTimer && m_settlingTimer->isActive(); }
     void beginSettling(int durationMs = 2000);  // Start settling period
+
+    // Ranges
+    ParamRange getBrightnessRange() const { return m_brightnessRange; }
+    ParamRange getContrastRange() const { return m_contrastRange; }
+    ParamRange getSaturationRange() const { return m_saturationRange; }
+    ParamRange getWhiteBalanceKelvinRange() const { return m_whiteBalanceKelvinRange; }
+    const std::vector<int>& getSupportedWhiteBalanceTypes() const { return m_supportedWhiteBalanceTypes; }
 
 signals:
     void cameraConnected(const CameraInfo &info);
@@ -130,12 +148,26 @@ private:
     CameraState m_cachedState;  // Cache intended state during settling
     Config m_config;
     QTimer *m_settlingTimer;  // Timer for settling period after config apply
+    ParamRange m_brightnessRange;
+    ParamRange m_contrastRange;
+    ParamRange m_saturationRange;
+    ParamRange m_whiteBalanceKelvinRange;
+    std::vector<int> m_supportedWhiteBalanceTypes;
+    int m_lastRequestedWhiteBalance;
+    bool m_whiteBalanceFallbackActive;
+    int m_fallbackWhiteBalanceMode;
     bool isTiny2Family() const;
 
     // Helper
     bool executeCommand(const QString &description, std::function<int32_t()> command);
     void updateState();
     void saveCurrentStateToConfig();  // Update config with current camera state
+    void refreshControlRanges();
+    void resetControlRanges();
+    int clampToRange(int value, const ParamRange &range, int fallbackMin, int fallbackMax) const;
+    int whiteBalancePresetToKelvin(int mode) const;
+    bool applyManualWhiteBalance(int kelvin, int displayMode);
+    bool isWhiteBalanceTypeSupported(int mode) const;
 };
 
 #endif // CAMERACONTROLLER_H

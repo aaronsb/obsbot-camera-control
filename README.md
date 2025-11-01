@@ -30,6 +30,7 @@ A native Qt6 application for controlling OBSBOT cameras on Linux. Provides full 
 - **Usage Detection** - Warns when camera is in use by other applications (Chrome, OBS, Zoom)
 - **Resource Management** - Automatically releases camera when not needed
 - **Intelligent Layout** - Window expands only when preview successfully opens
+- **GPU Filters** - Apply GLSL-driven color filters with adjustable intensity for both preview and virtual camera output
 
 ### System Integration
 - **System Tray** - Minimize to tray, click to restore
@@ -156,6 +157,22 @@ The build script automatically:
 - If another app is using the camera, you'll see a warning with the process name
 - Close the blocking application and try again
 - Preview automatically disabled when window is hidden/minimized
+- Use the **Filter** controls above the preview to apply GPU shaders (None, Grayscale, Sepia, Invert, Warm, Cool) and tune their intensity. Changes appear instantly in the preview and in the virtual camera stream.
+
+### Virtual Camera
+- Packages ship the systemd unit and modprobe configuration needed for a virtual camera, but they are **not** enabled automatically.
+- When you want the feature, either enable the service or load the module manually:
+  ```bash
+  sudo systemctl enable --now obsbot-virtual-camera.service
+  # or
+  sudo modprobe v4l2loopback video_nr=42 card_label="OBSBOT Virtual Camera" exclusive_caps=1
+  ```
+- The app shows whether the virtual camera device exists and gives setup guidance directly in the UI.
+- Once the module is active, toggle **Virtual Camera → Enable virtual camera output** inside the app to feed OBS/Zoom/Meet.
+
+### Model-Specific Extras
+- OBSBOT Tiny 2 family cameras expose additional controls (voice command toggles, LED brightness, microphone pickup distance) through the SDK.
+- The desktop app keeps these switches hidden so other models don’t surface unusable options. Advanced users can experiment via the CLI/SDK if needed.
 
 ### System Tray
 - Click **X** button to minimize to tray (doesn't quit)

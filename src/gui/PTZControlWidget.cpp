@@ -210,6 +210,7 @@ void PTZControlWidget::onStoreImagePreset()
     preset.state.saturationAuto = m_settingsWidget->isSaturationAuto();
     preset.state.saturation = m_settingsWidget->getSaturation();
     preset.state.whiteBalance = m_settingsWidget->getWhiteBalance();
+    preset.state.whiteBalanceKelvin = m_settingsWidget->getWhiteBalanceKelvin();
     updateImagePresetLabel(index);
 
     emit imagePresetUpdated(index);
@@ -246,6 +247,7 @@ void PTZControlWidget::onRecallImagePreset()
     m_settingsWidget->setSaturationAuto(preset.state.saturationAuto);
     m_settingsWidget->setSaturation(preset.state.saturation);
     m_settingsWidget->setWhiteBalance(preset.state.whiteBalance);
+    m_settingsWidget->setWhiteBalanceKelvin(preset.state.whiteBalanceKelvin);
 }
 
 void PTZControlWidget::updateImagePresetLabel(int index)

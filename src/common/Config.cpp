@@ -4,6 +4,7 @@
 #include <iostream>
 #include <cstdlib>
 #include <unordered_set>
+#include <algorithm>
 #include <sys/stat.h>
 #include <sys/types.h>
 
@@ -42,6 +43,7 @@ void Config::setDefaults()
     m_settings.saturationAuto = true;
     m_settings.saturation = 128;
     m_settings.whiteBalance = 0;      // Auto
+    m_settings.whiteBalanceKelvin = 5000;
 
     // Audio defaults
     m_settings.audioAutoGain = true;
@@ -60,6 +62,7 @@ void Config::setDefaults()
     m_settings.startMinimized = false;
     m_settings.virtualCameraEnabled = false;
     m_settings.virtualCameraDevice = "/dev/video42";
+    m_settings.virtualCameraResolution = "match";
 }
 
 std::string Config::getXdgConfigHome() const
@@ -181,7 +184,9 @@ bool Config::load(std::vector<ValidationError> &errors)
         "audio_auto_gain",
         "preview_format",
         "virtual_camera_enabled",
-        "virtual_camera_device"
+        "virtual_camera_device",
+        "virtual_camera_resolution",
+        "white_balance_kelvin"
     };
 
     auto isPresetKey = [](const std::string &key) -> bool {
@@ -486,8 +491,22 @@ bool Config::parseLine(const std::string &line, int lineNumber, std::vector<Vali
             m_settings.whiteBalance = 10;
         } else if (value == "shade" || value == "11") {
             m_settings.whiteBalance = 11;
+        } else if (value == "manual" || value == "255") {
+            m_settings.whiteBalance = 255;
         } else {
-            addError(InvalidValue, "white_balance must be auto/daylight/fluorescent/tungsten/flash/fine/cloudy/shade or numeric");
+            addError(InvalidValue, "white_balance must be auto/daylight/fluorescent/tungsten/flash/fine/cloudy/shade/manual or numeric");
+            return false;
+        }
+    } else if (key == "white_balance_kelvin") {
+        try {
+            int kelvin = std::stoi(value);
+            if (kelvin < 2000 || kelvin > 10000) {
+                addError(InvalidValue, "white_balance_kelvin must be between 2000 and 10000");
+                return false;
+            }
+            m_settings.whiteBalanceKelvin = kelvin;
+        } catch (...) {
+            addError(InvalidValue, "white_balance_kelvin must be an integer between 2000 and 10000");
             return false;
         }
     } else if (key == "audio_auto_gain") {
@@ -513,6 +532,38 @@ bool Config::parseLine(const std::string &line, int lineNumber, std::vector<Vali
             return false;
         }
         m_settings.virtualCameraDevice = value;
+    } else if (key == "virtual_camera_resolution") {
+        if (value.empty()) {
+            m_settings.virtualCameraResolution = "match";
+            return true;
+        }
+
+        std::string normalized = value;
+        std::replace(normalized.begin(), normalized.end(), 'X', 'x');
+
+        if (normalized == "match") {
+            m_settings.virtualCameraResolution = normalized;
+            return true;
+        }
+
+        size_t sep = normalized.find('x');
+        if (sep == std::string::npos) {
+            addError(InvalidValue, "virtual_camera_resolution must be 'match' or WIDTHxHEIGHT (e.g. 1280x720)");
+            return false;
+        }
+
+        try {
+            const int width = std::stoi(normalized.substr(0, sep));
+            const int height = std::stoi(normalized.substr(sep + 1));
+            if (width <= 0 || height <= 0) {
+                addError(InvalidValue, "virtual_camera_resolution width and height must be greater than zero");
+                return false;
+            }
+            m_settings.virtualCameraResolution = std::to_string(width) + "x" + std::to_string(height);
+        } catch (...) {
+            addError(InvalidValue, "virtual_camera_resolution must be 'match' or WIDTHxHEIGHT (e.g. 1280x720)");
+            return false;
+        }
     }
 
     return true;
@@ -558,6 +609,12 @@ bool Config::validateSettings(std::vector<ValidationError> &errors)
         addError("track_speed out of range (must be 0-5)");
     }
 
+    if (m_settings.whiteBalance == 255) {
+        if (m_settings.whiteBalanceKelvin < 2000 || m_settings.whiteBalanceKelvin > 10000) {
+            addError("white_balance_kelvin out of range (must be 2000-10000)");
+        }
+    }
+
     for (size_t i = 0; i < m_settings.presets.size(); ++i) {
         const auto &preset = m_settings.presets[i];
         if (!preset.defined) {
@@ -576,6 +633,26 @@ bool Config::validateSettings(std::vector<ValidationError> &errors)
 
     if (m_settings.virtualCameraDevice.empty()) {
         addError("virtual_camera_device cannot be empty");
+    }
+
+    if (m_settings.virtualCameraResolution.empty()) {
+        addError("virtual_camera_resolution cannot be empty");
+    } else if (m_settings.virtualCameraResolution != "match") {
+        const std::string &res = m_settings.virtualCameraResolution;
+        size_t sep = res.find('x');
+        if (sep == std::string::npos) {
+            addError("virtual_camera_resolution must be 'match' or WIDTHxHEIGHT (e.g. 1280x720)");
+        } else {
+            try {
+                const int width = std::stoi(res.substr(0, sep));
+                const int height = std::stoi(res.substr(sep + 1));
+                if (width <= 0 || height <= 0) {
+                    addError("virtual_camera_resolution width and height must be greater than zero");
+                }
+            } catch (...) {
+                addError("virtual_camera_resolution must be 'match' or WIDTHxHEIGHT (e.g. 1280x720)");
+            }
+        }
     }
 
     return errors.empty();
@@ -681,9 +758,12 @@ bool Config::save()
         case 9: wbStr = "fine"; break;
         case 10: wbStr = "cloudy"; break;
         case 11: wbStr = "shade"; break;
+        case 255: wbStr = "manual"; break;
         default: wbStr = "auto";
     }
-    file << "white_balance=" << wbStr << "\n\n";
+    file << "white_balance=" << wbStr << "\n";
+    file << "# Manual white balance temperature (Kelvin, only used when white_balance=manual)\n";
+    file << "white_balance_kelvin=" << m_settings.whiteBalanceKelvin << "\n\n";
 
     for (size_t i = 0; i < m_settings.presets.size(); ++i) {
         const auto &preset = m_settings.presets[i];
@@ -707,6 +787,8 @@ bool Config::save()
     file << "\n# Virtual camera output\n";
     file << "virtual_camera_enabled=" << (m_settings.virtualCameraEnabled ? "enabled" : "disabled") << "\n";
     file << "virtual_camera_device=" << (m_settings.virtualCameraDevice.empty() ? "/dev/video42" : m_settings.virtualCameraDevice) << "\n";
+    file << "# Set 'match' to follow the preview output, or WIDTHxHEIGHT (e.g. 1280x720)\n";
+    file << "virtual_camera_resolution=" << (m_settings.virtualCameraResolution.empty() ? "match" : m_settings.virtualCameraResolution) << "\n";
 
     file.close();
     std::cout << "[Config] Configuration saved successfully to " << configPath << std::endl;

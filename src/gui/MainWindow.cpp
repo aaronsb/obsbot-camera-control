@@ -15,6 +15,7 @@
 #include <QMediaDevices>
 #include <QCameraDevice>
 #include <QCloseEvent>
+#include <QResizeEvent>
 #include <QFrame>
 #include <QStyle>
 #include <QSplitter>
@@ -23,10 +24,12 @@
 #include <QSpacerItem>
 #include <QSizePolicy>
 #include <QGroupBox>
+#include <QComboBox>
 #include <QLineEdit>
 #include <QColor>
 #include <QPalette>
 #include <QList>
+#include <QFileInfo>
 #include <iostream>
 #include <array>
 #include <algorithm>
@@ -60,6 +63,77 @@ QColor blendColors(const QColor &from, const QColor &to, qreal progress)
         from.alphaF() * inverse + to.alphaF() * progress);
 }
 
+struct VirtualCameraResolutionPreset {
+    const char *key;
+    int width;
+    int height;
+};
+
+constexpr VirtualCameraResolutionPreset kVirtualCameraResolutionPresets[] = {
+    {"match", 0, 0},
+    {"960x540", 960, 540},
+    {"1280x720", 1280, 720},
+    {"1920x1080", 1920, 1080}
+};
+
+QString buildResolutionLabel(const VirtualCameraResolutionPreset &preset)
+{
+    if (preset.width <= 0 || preset.height <= 0) {
+        return MainWindow::tr("Match preview resolution");
+    }
+
+    const int progressiveHeight = preset.height;
+    return MainWindow::tr("%1p (%2 × %3)")
+        .arg(progressiveHeight)
+        .arg(preset.width)
+        .arg(preset.height);
+}
+
+QSize resolutionSizeForKey(const QString &key)
+{
+    if (key.isEmpty() || key.compare(QStringLiteral("match"), Qt::CaseInsensitive) == 0) {
+        return QSize();
+    }
+
+    QString normalized = key.trimmed();
+    normalized.replace(QLatin1Char('X'), QLatin1Char('x'));
+
+    const int separator = normalized.indexOf(QLatin1Char('x'));
+    if (separator <= 0) {
+        return QSize();
+    }
+
+    bool okWidth = false;
+    bool okHeight = false;
+    const int width = normalized.left(separator).toInt(&okWidth);
+    const int height = normalized.mid(separator + 1).toInt(&okHeight);
+
+    if (!okWidth || !okHeight || width <= 0 || height <= 0) {
+        return QSize();
+    }
+
+    return QSize(width, height);
+}
+
+bool isDefaultResolutionKey(const QString &key)
+{
+    for (const auto &preset : kVirtualCameraResolutionPresets) {
+        if (QLatin1String(preset.key).compare(key, Qt::CaseInsensitive) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+QString modprobeCommandForDevice(const QString &devicePath)
+{
+    static const QRegularExpression videoRegex(QStringLiteral("^/dev/video(\\d+)$"));
+    const QRegularExpressionMatch match = videoRegex.match(devicePath.trimmed());
+    const QString videoNr = match.hasMatch() ? match.captured(1) : QStringLiteral("42");
+    return MainWindow::tr("sudo modprobe v4l2loopback video_nr=%1 card_label=\"OBSBOT Virtual Camera\" exclusive_caps=1")
+        .arg(videoNr);
+}
+
 } // namespace
 
 MainWindow::MainWindow(QWidget *parent)
@@ -72,9 +146,13 @@ MainWindow::MainWindow(QWidget *parent)
     , m_previewCardMaxWidth(QWIDGETSIZE_MAX)
     , m_virtualCameraCheckbox(nullptr)
     , m_virtualCameraDeviceEdit(nullptr)
+    , m_virtualCameraResolutionCombo(nullptr)
+    , m_virtualCameraStatusLabel(nullptr)
+    , m_effectsWidget(nullptr)
     , m_virtualCameraStreamer(nullptr)
     , m_isApplyingStyle(false)
     , m_virtualCameraErrorNotified(false)
+    , m_virtualCameraAvailable(false)
 {
     setWindowTitle("OBSBOT Control");
     setWindowIcon(QIcon(":/icons/camera.svg"));
@@ -98,6 +176,8 @@ MainWindow::MainWindow(QWidget *parent)
 
     setupUI();
     setupTrayIcon();
+
+    m_lastDockedSize = size();
 
     // Load configuration
     loadConfiguration();
@@ -270,8 +350,13 @@ void MainWindow::setupUI()
     m_tabWidget->setDocumentMode(true);
     m_tabWidget->addTab(m_trackingWidget, tr("Tracking"));
     m_tabWidget->addTab(m_ptzWidget, tr("Presets"));
-   m_tabWidget->addTab(m_settingsWidget, tr("Image"));
-   controlLayout->addWidget(m_tabWidget, 1);
+    m_tabWidget->addTab(m_settingsWidget, tr("Camera Image"));
+    m_effectsWidget = new VideoEffectsWidget(this);
+    connect(m_effectsWidget, &VideoEffectsWidget::effectsChanged,
+            this, &MainWindow::onVideoEffectsChanged);
+    m_tabWidget->addTab(m_effectsWidget, tr("Creative FX"));
+    controlLayout->addWidget(m_tabWidget, 1);
+    m_effectsWidget->reset();
 
     QGroupBox *virtualCameraGroup = new QGroupBox(tr("Virtual Camera"), m_controlCard);
     QVBoxLayout *virtualLayout = new QVBoxLayout(virtualCameraGroup);
@@ -298,6 +383,38 @@ void MainWindow::setupUI()
     virtualDeviceLayout->addWidget(m_virtualCameraDeviceEdit, 1);
 
     virtualLayout->addLayout(virtualDeviceLayout);
+
+    m_virtualCameraStatusLabel = new QLabel(
+        tr("Virtual camera support requires the v4l2loopback kernel module."),
+        virtualCameraGroup);
+    m_virtualCameraStatusLabel->setWordWrap(true);
+    m_virtualCameraStatusLabel->setObjectName("virtualCameraStatus");
+    virtualLayout->addWidget(m_virtualCameraStatusLabel);
+
+    QHBoxLayout *virtualResolutionLayout = new QHBoxLayout();
+    virtualResolutionLayout->setContentsMargins(0, 0, 0, 0);
+    virtualResolutionLayout->setSpacing(8);
+
+    QLabel *virtualResolutionLabel = new QLabel(tr("Output resolution"), virtualCameraGroup);
+    virtualResolutionLayout->addWidget(virtualResolutionLabel);
+
+    m_virtualCameraResolutionCombo = new QComboBox(virtualCameraGroup);
+    m_virtualCameraResolutionCombo->setSizeAdjustPolicy(QComboBox::AdjustToContents);
+    for (const auto &preset : kVirtualCameraResolutionPresets) {
+        const QString key = QLatin1String(preset.key);
+        const QString label = buildResolutionLabel(preset);
+        m_virtualCameraResolutionCombo->addItem(label, key);
+    }
+    connect(m_virtualCameraResolutionCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, &MainWindow::onVirtualCameraResolutionChanged);
+    virtualResolutionLayout->addWidget(m_virtualCameraResolutionCombo, 1);
+
+    virtualLayout->addLayout(virtualResolutionLayout);
+
+    QLabel *virtualResolutionHint = new QLabel(tr("Pick a fixed size to keep Zoom and other apps happy when you change preview quality."), virtualCameraGroup);
+    virtualResolutionHint->setWordWrap(true);
+    virtualResolutionHint->setStyleSheet("color: palette(mid); font-size: 11px;");
+    virtualLayout->addWidget(virtualResolutionHint);
     controlLayout->addWidget(virtualCameraGroup);
 
     m_startMinimizedCheckbox = new QCheckBox(tr("Launch minimized / Close to tray"), m_controlCard);
@@ -538,6 +655,8 @@ void MainWindow::detachPreviewToWindow()
         return;
     }
 
+    m_lastDockedSize = size();
+
     if (m_previewStack->indexOf(m_previewWidget) != -1) {
         m_previewStack->removeWidget(m_previewWidget);
     }
@@ -582,6 +701,7 @@ void MainWindow::attachPreviewToPanel()
         if (m_previewStack->indexOf(m_previewWidget) == -1) {
             m_previewStack->insertWidget(0, m_previewWidget);
         }
+        m_lastDockedSize = size();
         return;
     }
 
@@ -615,10 +735,17 @@ void MainWindow::attachPreviewToPanel()
         m_widthLocked = false;
         setMinimumWidth(m_dockedMinWidth);
         setMaximumWidth(QWIDGETSIZE_MAX);
-        resize(std::max(width(), m_dockedMinWidth), height());
+        const int targetWidth = m_lastDockedSize.width() > 0
+            ? std::max(m_lastDockedSize.width(), m_dockedMinWidth)
+            : std::max(width(), m_dockedMinWidth);
+        const int targetHeight = m_lastDockedSize.height() > 0
+            ? m_lastDockedSize.height()
+            : height();
+        resize(targetWidth, targetHeight);
     }
 
     m_previewDetached = false;
+    m_lastDockedSize = size();
 }
 
 void MainWindow::updatePreviewControls()
@@ -828,24 +955,84 @@ void MainWindow::updateStatus()
     m_statusLabel->setText("Status: " + statusParts.join(" | "));
 }
 
+QString MainWindow::currentVirtualCameraDevicePath() const
+{
+    if (!m_virtualCameraDeviceEdit) {
+        return QStringLiteral("/dev/video42");
+    }
+
+    const QString path = m_virtualCameraDeviceEdit->text().trimmed();
+    if (path.isEmpty()) {
+        return QStringLiteral("/dev/video42");
+    }
+
+    return path;
+}
+
+void MainWindow::updateVirtualCameraAvailability(const QString &devicePath)
+{
+    if (!m_virtualCameraStatusLabel) {
+        m_virtualCameraAvailable = false;
+        return;
+    }
+
+    const QFileInfo moduleInfo(QStringLiteral("/sys/module/v4l2loopback"));
+    const QFileInfo deviceInfo(devicePath);
+
+    const bool deviceExists = deviceInfo.exists();
+    const bool moduleLoaded = moduleInfo.exists();
+    const QString modprobeCommand = modprobeCommandForDevice(devicePath);
+
+    QString statusText;
+    QString statusColor;
+
+    if (deviceExists) {
+        statusText = tr("Virtual camera available (%1)").arg(devicePath);
+        statusColor = QStringLiteral("#2e7d32");
+        m_virtualCameraAvailable = true;
+    } else if (moduleLoaded) {
+        statusText = tr("v4l2loopback is loaded, but %1 does not exist.\nRun: %2")
+                         .arg(devicePath, modprobeCommand);
+        statusColor = QStringLiteral("#b26a00");
+        m_virtualCameraAvailable = false;
+    } else {
+        statusText = tr("Virtual camera support is disabled.\nInstall the module and load it with:\n%1")
+                         .arg(modprobeCommand);
+        statusColor = QStringLiteral("#b71c1c");
+        m_virtualCameraAvailable = false;
+    }
+
+    m_virtualCameraStatusLabel->setText(statusText);
+    m_virtualCameraStatusLabel->setStyleSheet(QStringLiteral("color: %1;").arg(statusColor));
+    if (m_virtualCameraCheckbox) {
+        m_virtualCameraCheckbox->setToolTip(statusText);
+    }
+}
+
 void MainWindow::updateVirtualCameraStreamerState()
 {
     if (!m_virtualCameraStreamer) {
         return;
     }
 
-    QString devicePath;
-    if (m_virtualCameraDeviceEdit) {
-        devicePath = m_virtualCameraDeviceEdit->text().trimmed();
-    }
-    if (devicePath.isEmpty()) {
-        devicePath = QStringLiteral("/dev/video42");
-    }
+    const QString devicePath = currentVirtualCameraDevicePath();
 
+    updateVirtualCameraAvailability(devicePath);
     m_virtualCameraStreamer->setDevicePath(devicePath);
 
-    const bool enableOutput = m_virtualCameraCheckbox && m_virtualCameraCheckbox->isChecked()
-        && m_previewWidget && m_previewWidget->isPreviewEnabled();
+    QString resolutionKey;
+    if (m_virtualCameraResolutionCombo && m_virtualCameraResolutionCombo->currentIndex() >= 0) {
+        resolutionKey = m_virtualCameraResolutionCombo->currentData().toString();
+    }
+    if (resolutionKey.isEmpty()) {
+        resolutionKey = QString::fromStdString(m_controller->getConfig().getSettings().virtualCameraResolution);
+    }
+    const QSize forcedSize = resolutionSizeForKey(resolutionKey);
+    m_virtualCameraStreamer->setForcedResolution(forcedSize);
+
+    const bool userRequested = m_virtualCameraCheckbox && m_virtualCameraCheckbox->isChecked();
+    const bool previewActive = m_previewWidget && m_previewWidget->isPreviewEnabled();
+    const bool enableOutput = userRequested && previewActive && m_virtualCameraAvailable;
     m_virtualCameraStreamer->setEnabled(enableOutput);
 }
 
@@ -907,6 +1094,30 @@ void MainWindow::loadConfiguration()
         m_virtualCameraDeviceEdit->blockSignals(true);
         m_virtualCameraDeviceEdit->setText(QString::fromStdString(settings.virtualCameraDevice));
         m_virtualCameraDeviceEdit->blockSignals(false);
+    }
+
+    m_settingsWidget->setWhiteBalanceKelvin(settings.whiteBalanceKelvin);
+
+    if (m_virtualCameraResolutionCombo) {
+        const QString key = QString::fromStdString(settings.virtualCameraResolution);
+        m_virtualCameraResolutionCombo->blockSignals(true);
+        int index = m_virtualCameraResolutionCombo->findData(key);
+        if (index < 0) {
+            const QSize customSize = resolutionSizeForKey(key);
+            if (customSize.isValid()) {
+                const QString label = tr("Custom (%1 × %2)")
+                    .arg(customSize.width())
+                    .arg(customSize.height());
+                m_virtualCameraResolutionCombo->addItem(label, key);
+                index = m_virtualCameraResolutionCombo->count() - 1;
+            } else {
+                index = m_virtualCameraResolutionCombo->findData(QStringLiteral("match"));
+            }
+        }
+        if (index >= 0) {
+            m_virtualCameraResolutionCombo->setCurrentIndex(index);
+        }
+        m_virtualCameraResolutionCombo->blockSignals(false);
     }
 
     m_virtualCameraErrorNotified = false;
@@ -985,6 +1196,7 @@ CameraController::CameraState MainWindow::getUIState() const
     state.saturationAuto = m_settingsWidget->isSaturationAuto();
     state.saturation = m_settingsWidget->getSaturation();
     state.whiteBalance = m_settingsWidget->getWhiteBalance();
+    state.whiteBalanceKelvin = m_settingsWidget->getWhiteBalanceKelvin();
 
     // Get PTZ state from controller (defaults from config)
     auto currentState = m_controller->getCurrentState();
@@ -1030,6 +1242,14 @@ void MainWindow::changeEvent(QEvent *event)
             }
         }
     }
+}
+
+void MainWindow::resizeEvent(QResizeEvent *event)
+{
+    if (!m_previewDetached && !m_widthLocked) {
+        m_lastDockedSize = event->size();
+    }
+    QMainWindow::resizeEvent(event);
 }
 
 void MainWindow::onPreviewStarted()
@@ -1085,6 +1305,7 @@ void MainWindow::onPreviewFormatChanged(const QString &formatId)
     settings.previewFormat = formatId.toStdString();
     m_controller->getConfig().setSettings(settings);
     m_controller->saveConfig();
+    updateVirtualCameraStreamerState();
 }
 
 void MainWindow::onPresetUpdated(int index, double pan, double tilt, double zoom, bool defined)
@@ -1311,10 +1532,16 @@ void MainWindow::onVirtualCameraToggled(bool enabled)
 
     updateVirtualCameraStreamerState();
 
-    if (enabled && !m_previewWidget->isPreviewEnabled()) {
-        QMessageBox::information(this,
-            tr("Virtual Camera Ready"),
-            tr("The virtual camera will start streaming once the live preview is enabled."));
+    if (enabled) {
+        if (!m_virtualCameraAvailable) {
+            QMessageBox::information(this,
+                tr("Virtual Camera Not Available"),
+                tr("v4l2loopback is not active yet. See the status message below for setup instructions."));
+        } else if (!m_previewWidget->isPreviewEnabled()) {
+            QMessageBox::information(this,
+                tr("Virtual Camera Ready"),
+                tr("The virtual camera will start streaming once the live preview is enabled."));
+        }
     }
 }
 
@@ -1332,6 +1559,29 @@ void MainWindow::onVirtualCameraDeviceEdited()
 
     auto settings = m_controller->getConfig().getSettings();
     settings.virtualCameraDevice = path.toStdString();
+    m_controller->getConfig().setSettings(settings);
+    m_controller->saveConfig();
+
+    m_virtualCameraErrorNotified = false;
+    updateVirtualCameraStreamerState();
+}
+
+void MainWindow::onVirtualCameraResolutionChanged(int index)
+{
+    if (!m_virtualCameraResolutionCombo || index < 0) {
+        return;
+    }
+
+    const QString key = m_virtualCameraResolutionCombo->itemData(index).toString();
+
+    auto settings = m_controller->getConfig().getSettings();
+    const QString currentKey = QString::fromStdString(settings.virtualCameraResolution);
+    if (key == currentKey) {
+        updateVirtualCameraStreamerState();
+        return;
+    }
+
+    settings.virtualCameraResolution = key.isEmpty() ? std::string("match") : key.toStdString();
     m_controller->getConfig().setSettings(settings);
     m_controller->saveConfig();
 
@@ -1364,4 +1614,12 @@ void MainWindow::onVirtualCameraError(const QString &message)
     m_controller->saveConfig();
 
     updateVirtualCameraStreamerState();
+}
+
+void MainWindow::onVideoEffectsChanged(const FilterPreviewWidget::VideoEffectsSettings &settings)
+{
+    if (!m_previewWidget) {
+        return;
+    }
+    m_previewWidget->setVideoEffects(settings);
 }

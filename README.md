@@ -106,7 +106,7 @@ Other OBSBOT cameras may work with varying degrees of functionality. The SDK sup
 For the adventurous, a single command that clones the repo to `~/src/obsbot-camera-control` and builds/installs:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/aaronsb/obsbot-camera-control/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/aaronsb/obsbot-camera-control/main/local-install.sh | bash
 ```
 
 ⚠️ **What this does:**

@@ -795,8 +795,14 @@ void MainWindow::onTogglePreview(bool enabled)
         m_cameraWarningLabel->setVisible(false);
         m_cameraWarningLabel->setText("");
 
-        // Find which video device is the OBSBOT camera
-        QString devicePath = findObsbotVideoDevice();
+        // Prefer SDK-reported UVC path when connected; else fall back to description-based detection
+        QString devicePath;
+        if (m_controller->isConnected()) {
+            devicePath = m_controller->getVideoDevicePath();
+        }
+        if (devicePath.isEmpty()) {
+            devicePath = findObsbotVideoDevice();
+        }
 
         if (devicePath.isEmpty()) {
             // Could not detect OBSBOT camera device

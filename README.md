@@ -308,24 +308,6 @@ Contributions welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for build instruct
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+MIT License — see [LICENSE](LICENSE) for details.
 
-**Important:** The application code (src/) is MIT licensed, but it links against the
-OBSBOT SDK (sdk/), which is proprietary software owned by OBSBOT. The SDK appears to
-have been released without an explicit license and is likely intended for reference use.
-
-Users of this software must comply with any applicable OBSBOT licensing terms.
-
-## Disclaimer
-
-This is an unofficial third-party application. Not affiliated with or endorsed by OBSBOT.
-
-The OBSBOT SDK was likely released as a minimal reference implementation for Linux support.
-This project extends that foundation into a full-featured graphical application, but makes
-no warranty about compatibility or support from OBSBOT.
-
----
-
-**Made with ❤️ for the Linux community**
-
-*Because Linux users deserve native camera control too.*
+The OBSBOT SDK (`sdk/`) is distributed by OBSBOT without a license. This is an unofficial third-party application, not affiliated with or endorsed by OBSBOT.

@@ -18,6 +18,7 @@
 #include <QResizeEvent>
 #include <QFrame>
 #include <QStyle>
+#include <QScrollArea>
 #include <QSplitter>
 #include <QStackedWidget>
 #include <QTabWidget>
@@ -275,18 +276,31 @@ void MainWindow::setupUI()
     m_previewStack->addWidget(m_previewPlaceholder);
     m_previewStack->setCurrentWidget(m_previewPlaceholder);
 
-    // Control column
+    // Control column (scrollable so window can be smaller)
     m_controlCard = new QFrame(m_splitter);
     m_controlCard->setObjectName("controlCard");
     m_controlCard->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Expanding);
-    m_controlCard->setMinimumWidth(360);
-    m_controlCard->setMaximumWidth(420);
+    m_controlCard->setMinimumWidth(380);
+    m_controlCard->setMaximumWidth(480);
 
     QVBoxLayout *controlLayout = new QVBoxLayout(m_controlCard);
-    controlLayout->setContentsMargins(18, 20, 18, 20);
-    controlLayout->setSpacing(18);
+    controlLayout->setContentsMargins(0, 0, 0, 0);
+    controlLayout->setSpacing(0);
 
-    m_statusBanner = new QFrame(m_controlCard);
+    QScrollArea *controlScroll = new QScrollArea(m_controlCard);
+    controlScroll->setObjectName("controlScroll");
+    controlScroll->setWidgetResizable(true);
+    controlScroll->setFrameShape(QFrame::NoFrame);
+    controlScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    controlScroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+
+    QWidget *scrollContent = new QWidget(controlScroll);
+    scrollContent->setMinimumWidth(0);  // allow shrinking to viewport so content is not clipped
+    QVBoxLayout *scrollLayout = new QVBoxLayout(scrollContent);
+    scrollLayout->setContentsMargins(18, 20, 18, 20);
+    scrollLayout->setSpacing(18);
+
+    m_statusBanner = new QFrame(scrollContent);
     m_statusBanner->setObjectName("statusBanner");
     m_statusBanner->setProperty("state", "disconnected");
     QVBoxLayout *statusLayout = new QVBoxLayout(m_statusBanner);
@@ -313,9 +327,9 @@ void MainWindow::setupUI()
     m_cameraWarningLabel->setVisible(false);
     statusLayout->addWidget(m_cameraWarningLabel);
 
-    controlLayout->addWidget(m_statusBanner);
+    scrollLayout->addWidget(m_statusBanner);
 
-    QWidget *actionRow = new QWidget(m_controlCard);
+    QWidget *actionRow = new QWidget(scrollContent);
     actionRow->setObjectName("actionRow");
     QHBoxLayout *actionLayout = new QHBoxLayout(actionRow);
     actionLayout->setContentsMargins(0, 0, 0, 0);
@@ -336,7 +350,7 @@ void MainWindow::setupUI()
     });
     actionLayout->addWidget(m_reconnectButton);
 
-    controlLayout->addWidget(actionRow);
+    scrollLayout->addWidget(actionRow);
 
     m_trackingWidget = new TrackingControlWidget(m_controller, this);
     m_ptzWidget = new PTZControlWidget(m_controller, this);
@@ -345,7 +359,7 @@ void MainWindow::setupUI()
     connect(m_ptzWidget, &PTZControlWidget::presetUpdated,
             this, &MainWindow::onPresetUpdated);
 
-    m_tabWidget = new QTabWidget(m_controlCard);
+    m_tabWidget = new QTabWidget(scrollContent);
     m_tabWidget->setObjectName("controlTabs");
     m_tabWidget->setDocumentMode(true);
     m_tabWidget->addTab(m_trackingWidget, tr("Tracking"));
@@ -355,10 +369,10 @@ void MainWindow::setupUI()
     connect(m_effectsWidget, &VideoEffectsWidget::effectsChanged,
             this, &MainWindow::onVideoEffectsChanged);
     m_tabWidget->addTab(m_effectsWidget, tr("Creative FX"));
-    controlLayout->addWidget(m_tabWidget);
+    scrollLayout->addWidget(m_tabWidget);
     m_effectsWidget->reset();
 
-    QGroupBox *virtualCameraGroup = new QGroupBox(tr("Virtual Camera"), m_controlCard);
+    QGroupBox *virtualCameraGroup = new QGroupBox(tr("Virtual Camera"), scrollContent);
     QVBoxLayout *virtualLayout = new QVBoxLayout(virtualCameraGroup);
     virtualLayout->setContentsMargins(16, 16, 16, 16);
     virtualLayout->setSpacing(10);
@@ -415,21 +429,21 @@ void MainWindow::setupUI()
     virtualResolutionHint->setWordWrap(true);
     virtualResolutionHint->setStyleSheet("color: palette(mid); font-size: 11px;");
     virtualLayout->addWidget(virtualResolutionHint);
-    controlLayout->addWidget(virtualCameraGroup);
+    scrollLayout->addWidget(virtualCameraGroup);
 
-    m_startMinimizedCheckbox = new QCheckBox(tr("Launch minimized / Close to tray"), m_controlCard);
+    m_startMinimizedCheckbox = new QCheckBox(tr("Launch minimized / Close to tray"), scrollContent);
     m_startMinimizedCheckbox->setObjectName("footerCheckbox");
     connect(m_startMinimizedCheckbox, &QCheckBox::toggled,
             this, &MainWindow::onStartMinimizedToggled);
-    controlLayout->addWidget(m_startMinimizedCheckbox);
+    scrollLayout->addWidget(m_startMinimizedCheckbox);
 
-    m_statusLabel = new QLabel(tr("Status: Initializing..."), m_controlCard);
+    m_statusLabel = new QLabel(tr("Status: Initializing..."), scrollContent);
     m_statusLabel->setObjectName("footerStatus");
     m_statusLabel->setWordWrap(true);
-    controlLayout->addWidget(m_statusLabel);
+    scrollLayout->addWidget(m_statusLabel);
 
-    // Add stretch to push controls to top and absorb extra vertical space
-    controlLayout->addStretch();
+    controlScroll->setWidget(scrollContent);
+    controlLayout->addWidget(controlScroll);
 
     m_splitter->addWidget(m_previewCard);
     m_splitter->addWidget(m_controlCard);
@@ -456,7 +470,10 @@ void MainWindow::setupUI()
     m_previewCardMinWidth = m_previewCard->minimumWidth();
     m_previewCardMaxWidth = m_previewCard->maximumWidth();
     m_dockedMinWidth = sizeHint().width();
-    setMinimumWidth(m_dockedMinWidth);
+    // Minimum 840×480: fits 640×480 preview + 200px controls + margins/splitter
+    const int minWindowWidth = 840;
+    const int minWindowHeight = 480;
+    setMinimumSize(std::max(m_dockedMinWidth, minWindowWidth), minWindowHeight);
     setMaximumWidth(QWIDGETSIZE_MAX);
 
     const int desiredWidth = 1600;

@@ -50,8 +50,7 @@ src/
 │   ├── CameraSettingsWidget.cpp/h     # Image settings
 │   └── CameraPreviewWidget.cpp/h      # Live preview
 ├── cli/           # CLI tool
-├── common/        # Shared code
-└── camera/        # Camera controller
+└── common/        # Shared code (config, camera controller)
 ```
 
 ## Camera-Specific Notes

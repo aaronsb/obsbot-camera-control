@@ -1,5 +1,5 @@
 # Build directories
-build/
+/build/
 build-*/
 cmake-build-*/
 bin/
@@ -13,11 +13,15 @@ qrc_*.cpp
 
 # C++ compiled files
 *.o
-*.so
 *.a
 *.dylib
 *.dll
 *.exe
+
+# Shared libraries (except SDK which we vendor)
+*.so
+!sdk/**/*.so
+!sdk/**/*.so.*
 
 # IDE files
 .vscode/

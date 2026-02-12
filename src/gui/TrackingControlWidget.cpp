@@ -10,6 +10,15 @@ TrackingControlWidget::TrackingControlWidget(CameraController *controller, QWidg
     // Create debounce timer for command completion
     m_commandTimer = new QTimer(this);
     m_commandTimer->setSingleShot(true);
+
+    // Throttle pan/tilt to avoid flooding the camera with commands
+    m_panTiltTimer = new QTimer(this);
+    m_panTiltTimer->setSingleShot(true);
+    m_panTiltTimer->setInterval(100);
+    connect(m_panTiltTimer, &QTimer::timeout, this, [this]() {
+        m_controller->setPanTilt(m_pendingPan, m_pendingTilt);
+    });
+
     m_tiny2Capabilities = m_controller->hasTiny2Capabilities();
 
     QVBoxLayout *layout = new QVBoxLayout(this);
@@ -110,54 +119,19 @@ TrackingControlWidget::TrackingControlWidget(CameraController *controller, QWidg
     ptzGroupLayout->setContentsMargins(16, 16, 16, 16);
     ptzGroupLayout->setSpacing(12);
 
-    // Pan/Tilt buttons in a grid
-    QGridLayout *panTiltGrid = new QGridLayout();
+    // Two-column layout: sliders left, XY pad right
+    QHBoxLayout *columnsLayout = new QHBoxLayout();
+    columnsLayout->setSpacing(16);
 
-    m_tiltUpBtn = new QPushButton("↑", this);
-    m_tiltUpBtn->setFixedSize(60, 60);
-    m_tiltUpBtn->setToolTip("Tilt Up");
-
-    m_tiltDownBtn = new QPushButton("↓", this);
-    m_tiltDownBtn->setFixedSize(60, 60);
-    m_tiltDownBtn->setToolTip("Tilt Down");
-
-    m_panLeftBtn = new QPushButton("←", this);
-    m_panLeftBtn->setFixedSize(60, 60);
-    m_panLeftBtn->setToolTip("Pan Left");
-
-    m_panRightBtn = new QPushButton("→", this);
-    m_panRightBtn->setFixedSize(60, 60);
-    m_panRightBtn->setToolTip("Pan Right");
-
-    m_centerBtn = new QPushButton("⊙", this);
-    m_centerBtn->setFixedSize(60, 60);
-    m_centerBtn->setToolTip("Center View");
-
-    panTiltGrid->addWidget(m_tiltUpBtn, 0, 1, Qt::AlignCenter);
-    panTiltGrid->addWidget(m_panLeftBtn, 1, 0, Qt::AlignCenter);
-    panTiltGrid->addWidget(m_centerBtn, 1, 1, Qt::AlignCenter);
-    panTiltGrid->addWidget(m_panRightBtn, 1, 2, Qt::AlignCenter);
-    panTiltGrid->addWidget(m_tiltDownBtn, 2, 1, Qt::AlignCenter);
-
-    connect(m_tiltUpBtn, &QPushButton::clicked, this, &TrackingControlWidget::onTiltUpClicked);
-    connect(m_tiltDownBtn, &QPushButton::clicked, this, &TrackingControlWidget::onTiltDownClicked);
-    connect(m_panLeftBtn, &QPushButton::clicked, this, &TrackingControlWidget::onPanLeftClicked);
-    connect(m_panRightBtn, &QPushButton::clicked, this, &TrackingControlWidget::onPanRightClicked);
-    connect(m_centerBtn, &QPushButton::clicked, this, &TrackingControlWidget::onCenterClicked);
-
-    QWidget *panTiltWidget = new QWidget(this);
-    panTiltWidget->setLayout(panTiltGrid);
-    ptzGroupLayout->addWidget(panTiltWidget, 0, Qt::AlignCenter);
-
-    // Position label
-    m_positionLabel = new QLabel("Position: Pan 0.00, Tilt 0.00", this);
-    m_positionLabel->setAlignment(Qt::AlignCenter);
-    m_positionLabel->setStyleSheet("color: palette(mid); font-size: 11px;");
-    ptzGroupLayout->addWidget(m_positionLabel);
+    // Left column: sliders and checkboxes
+    QVBoxLayout *leftColumn = new QVBoxLayout();
+    leftColumn->addStretch();
 
     // Zoom slider
     QHBoxLayout *zoomLayout = new QHBoxLayout();
-    zoomLayout->addWidget(new QLabel("Zoom:", this));
+    QLabel *zoomLabel = new QLabel("Zoom:", this);
+    zoomLabel->setFixedWidth(40);
+    zoomLayout->addWidget(zoomLabel);
     m_zoomSlider = new QSlider(Qt::Horizontal, this);
     m_zoomSlider->setMinimum(10);  // 1.0x
     m_zoomSlider->setMaximum(20);  // 2.0x
@@ -167,8 +141,52 @@ TrackingControlWidget::TrackingControlWidget(CameraController *controller, QWidg
     m_zoomLabel = new QLabel("1.0x", this);
     m_zoomLabel->setMinimumWidth(40);
     zoomLayout->addWidget(m_zoomLabel);
+    leftColumn->addLayout(zoomLayout);
 
-    ptzGroupLayout->addLayout(zoomLayout);
+    // Focus slider
+    QHBoxLayout *focusLayout = new QHBoxLayout();
+    QLabel *focusLabel = new QLabel("Focus:", this);
+    focusLabel->setFixedWidth(40);
+    focusLayout->addWidget(focusLabel);
+    m_focusSlider = new QSlider(Qt::Horizontal, this);
+    m_focusSlider->setMinimum(0);
+    m_focusSlider->setMaximum(100);
+    m_focusSlider->setValue(50);
+    connect(m_focusSlider, &QSlider::valueChanged, this, &TrackingControlWidget::onFocusChanged);
+    focusLayout->addWidget(m_focusSlider);
+    m_focusLabel = new QLabel("50", this);
+    m_focusLabel->setMinimumWidth(40);
+    focusLayout->addWidget(m_focusLabel);
+    leftColumn->addLayout(focusLayout);
+
+    // Invert controls checkbox
+    m_invertControlsCheckBox = new QCheckBox(tr("Invert controls"), this);
+    m_invertControlsCheckBox->setStyleSheet("font-size: 10px;");
+    leftColumn->addWidget(m_invertControlsCheckBox);
+
+    // Mirror checkbox — syncs with Creative FX horizontal flip
+    m_mirrorCheckBox = new QCheckBox(tr("Mirror view"), this);
+    m_mirrorCheckBox->setStyleSheet("font-size: 10px;");
+    connect(m_mirrorCheckBox, &QCheckBox::toggled, this, [this](bool checked) {
+        emit mirrorToggled(checked);
+    });
+    leftColumn->addWidget(m_mirrorCheckBox);
+
+    leftColumn->addStretch();
+    columnsLayout->addLayout(leftColumn, 1);
+
+    // Right column: XY pad for pan/tilt
+    m_xyPad = new XYPad(this);
+    connect(m_xyPad, &XYPad::positionChanged, this, &TrackingControlWidget::onXYPadChanged);
+    columnsLayout->addWidget(m_xyPad);
+
+    ptzGroupLayout->addLayout(columnsLayout);
+
+    // Position label (full width below both columns)
+    m_positionLabel = new QLabel("Position: Pan 0.00, Tilt 0.00", this);
+    m_positionLabel->setAlignment(Qt::AlignCenter);
+    m_positionLabel->setStyleSheet("color: palette(mid); font-size: 11px;");
+    ptzGroupLayout->addWidget(m_positionLabel);
 
     ptzContainerLayout->addWidget(ptzGroupBox);
     layout->addWidget(m_ptzContainer);
@@ -317,6 +335,31 @@ void TrackingControlWidget::updateFromState(const CameraController::CameraState 
         }
     }
 
+    // Sync focus slider from camera state (only when user isn't dragging)
+    if (!m_focusSlider->isSliderDown() && !commandInFlight && !isSettling) {
+        if (m_focusSlider->value() != state.manualFocusValue) {
+            m_focusSlider->blockSignals(true);
+            m_focusSlider->setValue(state.manualFocusValue);
+            m_focusSlider->blockSignals(false);
+            m_focusLabel->setText(QString::number(state.manualFocusValue));
+        }
+    }
+
+    // Sync XY pad and position label from camera state (skip during active drag)
+    if (!m_xyPad->isDragging() && !commandInFlight && !isSettling) {
+        float padX = state.pan;
+        float padY = state.tilt;
+        // XY pad shows control position, so invert back when invert is active
+        if (m_invertControlsCheckBox->isChecked()) {
+            padX = -padX;
+            padY = -padY;
+        }
+        m_xyPad->setPosition(padX, padY);
+        m_positionLabel->setText(QString("Position: Pan %1, Tilt %2")
+            .arg(state.pan, 0, 'f', 2)
+            .arg(state.tilt, 0, 'f', 2));
+    }
+
     // If command completed and timer expired, we can now accept state updates
     if (!commandInFlight && m_userInitiated) {
         m_userInitiated = false;
@@ -405,47 +448,27 @@ void TrackingControlWidget::updatePTZControlsState()
     m_ptzContainer->setEnabled(enabled);
 }
 
-// Manual PTZ control implementations
-void TrackingControlWidget::onPanLeftClicked()
+// XY pad pan/tilt control — throttled to prevent command flooding
+void TrackingControlWidget::onXYPadChanged(float x, float y)
 {
-    m_controller->adjustPan(-0.05);
-    auto state = m_controller->getCurrentState();
-    m_positionLabel->setText(QString("Position: Pan %1, Tilt %2")
-        .arg(state.pan, 0, 'f', 2)
-        .arg(state.tilt, 0, 'f', 2));
-}
+    if (m_invertControlsCheckBox->isChecked()) {
+        x = -x;
+        y = -y;
+    }
 
-void TrackingControlWidget::onPanRightClicked()
-{
-    m_controller->adjustPan(0.05);
-    auto state = m_controller->getCurrentState();
-    m_positionLabel->setText(QString("Position: Pan %1, Tilt %2")
-        .arg(state.pan, 0, 'f', 2)
-        .arg(state.tilt, 0, 'f', 2));
-}
+    m_pendingPan = x;
+    m_pendingTilt = y;
 
-void TrackingControlWidget::onTiltUpClicked()
-{
-    m_controller->adjustTilt(0.05);
-    auto state = m_controller->getCurrentState();
+    // Update label immediately for responsive UI
     m_positionLabel->setText(QString("Position: Pan %1, Tilt %2")
-        .arg(state.pan, 0, 'f', 2)
-        .arg(state.tilt, 0, 'f', 2));
-}
+        .arg(x, 0, 'f', 2)
+        .arg(y, 0, 'f', 2));
 
-void TrackingControlWidget::onTiltDownClicked()
-{
-    m_controller->adjustTilt(-0.05);
-    auto state = m_controller->getCurrentState();
-    m_positionLabel->setText(QString("Position: Pan %1, Tilt %2")
-        .arg(state.pan, 0, 'f', 2)
-        .arg(state.tilt, 0, 'f', 2));
-}
-
-void TrackingControlWidget::onCenterClicked()
-{
-    m_controller->centerView();
-    m_positionLabel->setText("Position: Pan 0.00, Tilt 0.00");
+    // Send command immediately if timer isn't running, otherwise let it coalesce
+    if (!m_panTiltTimer->isActive()) {
+        m_controller->setPanTilt(x, y);
+        m_panTiltTimer->start();
+    }
 }
 
 void TrackingControlWidget::onZoomChanged(int value)
@@ -453,4 +476,20 @@ void TrackingControlWidget::onZoomChanged(int value)
     double zoom = value / 10.0;  // 10-20 -> 1.0-2.0
     m_controller->setZoom(zoom);
     m_zoomLabel->setText(QString("%1x").arg(zoom, 0, 'f', 1));
+}
+
+void TrackingControlWidget::onFocusChanged(int value)
+{
+    m_controller->setFocusAbsolute(value, false);
+    m_focusLabel->setText(QString::number(value));
+}
+
+void TrackingControlWidget::setMirrored(bool mirrored)
+{
+    // Sync checkbox without re-emitting mirrorToggled
+    if (m_mirrorCheckBox->isChecked() != mirrored) {
+        m_mirrorCheckBox->blockSignals(true);
+        m_mirrorCheckBox->setChecked(mirrored);
+        m_mirrorCheckBox->blockSignals(false);
+    }
 }

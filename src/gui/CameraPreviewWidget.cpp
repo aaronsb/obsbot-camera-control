@@ -78,6 +78,11 @@ CameraPreviewWidget::CameraPreviewWidget(QWidget *parent)
 
 CameraPreviewWidget::~CameraPreviewWidget()
 {
+    // Disconnect all signals from FilterPreviewWidget before stopping,
+    // otherwise processedFrameReady can fire into our partially-destroyed lambda
+    if (m_filterPreviewWidget) {
+        m_filterPreviewWidget->disconnect(this);
+    }
     stopPreview();
 }
 

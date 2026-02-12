@@ -89,6 +89,7 @@ private:
     QPushButton *m_previewToggleButton;
     QPushButton *m_detachPreviewButton;
     QPushButton *m_snapshotButton;
+    QPushButton *m_copyClipboardButton;
     QPushButton *m_reconnectButton;
     QLabel *m_deviceInfoLabel;
     QLabel *m_cameraWarningLabel;  // Warning for camera in use
@@ -128,12 +129,14 @@ private:
     int m_dockedMinWidth;
     int m_previewCardMinWidth;
     int m_previewCardMaxWidth;
-    QSize m_lastDockedSize;
+    QSize m_preDetachSize;
+    QList<int> m_preDetachSplitter;
 
     // System tray
     QSystemTrayIcon *m_trayIcon;
     QMenu *m_trayMenu;
 
+    bool m_snapshotToClipboard;
     bool m_isApplyingStyle;
     bool m_virtualCameraErrorNotified;
     bool m_virtualCameraAvailable;

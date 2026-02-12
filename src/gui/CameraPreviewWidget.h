@@ -86,6 +86,7 @@ private:
 
     bool m_previewEnabled;
     bool m_isApplyingFormat;
+    QMetaObject::Connection m_snapshotConnection;
 };
 
 #endif // CAMERAPREVIEWWIDGET_H

@@ -22,7 +22,6 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
-#include <memory>
 
 namespace {
 
@@ -211,10 +210,12 @@ void CameraPreviewWidget::captureSnapshot()
         return;
     }
 
-    auto conn = std::make_shared<QMetaObject::Connection>();
-    *conn = connect(m_filterPreviewWidget, &FilterPreviewWidget::processedFrameReady,
-                    this, [this, conn](const QImage &image) {
-                        disconnect(*conn);
+    // Cancel any pending snapshot before arming a new one
+    disconnect(m_snapshotConnection);
+
+    m_snapshotConnection = connect(m_filterPreviewWidget, &FilterPreviewWidget::processedFrameReady,
+                    this, [this](const QImage &image) {
+                        disconnect(m_snapshotConnection);
                         emit snapshotCaptured(image);
                     });
 }
@@ -249,6 +250,8 @@ void CameraPreviewWidget::startPreview()
 
 void CameraPreviewWidget::stopPreview()
 {
+    disconnect(m_snapshotConnection);
+
     if (m_videoSink) {
         disconnect(m_videoSink, nullptr, this, nullptr);
         delete m_videoSink;

@@ -247,7 +247,7 @@ void MainWindow::setupUI()
     previewHeader->addStretch();
 
     m_snapshotButton = new QPushButton(tr("Snapshot"), m_previewCard);
-    m_snapshotButton->setObjectName("detachButton");
+    m_snapshotButton->setObjectName("snapshotButton");
     m_snapshotButton->setEnabled(false);
     previewHeader->addWidget(m_snapshotButton);
 
@@ -1721,22 +1721,18 @@ void MainWindow::onSnapshotCaptured(const QImage &image)
     }
 
     QDir dir(saveDir);
-    if (!dir.exists()) {
-        dir.mkpath(QStringLiteral("."));
+    if (!dir.exists() && !dir.mkpath(QStringLiteral("."))) {
+        m_statusLabel->setText(tr("Snapshot copied to clipboard (cannot create %1)").arg(saveDir));
+        return;
     }
 
     QString timestamp = QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd_HHmmss"));
-    QString filePath = saveDir + QStringLiteral("/obsbot_") + timestamp + QStringLiteral(".png");
+    QString baseName = saveDir + QStringLiteral("/obsbot_") + timestamp;
+    QString filePath = baseName + QStringLiteral(".png");
 
     // Avoid overwriting if multiple snaps in the same second
-    if (QFile::exists(filePath)) {
-        for (int i = 1; i < 100; ++i) {
-            filePath = saveDir + QStringLiteral("/obsbot_") + timestamp
-                       + QStringLiteral("_") + QString::number(i) + QStringLiteral(".png");
-            if (!QFile::exists(filePath)) {
-                break;
-            }
-        }
+    for (int i = 1; QFile::exists(filePath) && i < 1000; ++i) {
+        filePath = baseName + QStringLiteral("_") + QString::number(i) + QStringLiteral(".png");
     }
 
     if (image.save(filePath, "PNG")) {

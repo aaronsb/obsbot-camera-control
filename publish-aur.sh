@@ -3,10 +3,19 @@
 # OBSBOT Control - AUR Publishing Script
 #
 # Automates the process of publishing updates to the AUR package.
-# Usage: ./publish-aur.sh [commit-message]
+# Usage: ./publish-aur.sh [--confirm] [commit-message]
+#   --confirm  Skip all interactive prompts (auto-yes)
 #
 
 set -e
+
+# Parse flags
+CONFIRM=false
+for arg in "$@"; do
+    case "$arg" in
+        --confirm) CONFIRM=true; shift ;;
+    esac
+done
 
 # Colors for output
 if [ -t 1 ]; then
@@ -51,11 +60,15 @@ if ! git diff-index --quiet HEAD -- 2>/dev/null; then
     print_msg "$YELLOW" "⚠️  Warning: You have uncommitted changes"
     git status --short
     echo ""
-    read -p "Continue anyway? [y/N] " -n 1 -r
-    echo ""
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-        print_msg "$YELLOW" "Publish cancelled. Commit your changes first."
-        exit 0
+    if [ "$CONFIRM" = true ]; then
+        print_msg "$YELLOW" "  --confirm: continuing with uncommitted changes"
+    else
+        read -p "Continue anyway? [y/N] " -n 1 -r
+        echo ""
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            print_msg "$YELLOW" "Publish cancelled. Commit your changes first."
+            exit 0
+        fi
     fi
 fi
 
@@ -80,8 +93,12 @@ if [ "$AHEAD" -gt 0 ]; then
     print_msg "$YELLOW" "⚠️  Warning: Your local branch is $AHEAD commit(s) ahead of origin/$CURRENT_BRANCH"
     print_msg "$YELLOW" "You need to push to GitHub before publishing to AUR!"
     echo ""
-    read -p "Push to origin/$CURRENT_BRANCH now? [Y/n] " -n 1 -r
-    echo ""
+    if [ "$CONFIRM" = true ]; then
+        REPLY="Y"
+    else
+        read -p "Push to origin/$CURRENT_BRANCH now? [Y/n] " -n 1 -r
+        echo ""
+    fi
     if [[ ! $REPLY =~ ^[Nn]$ ]]; then
         git push origin "$CURRENT_BRANCH"
         print_msg "$GREEN" "✓ Pushed to origin/$CURRENT_BRANCH"
@@ -99,8 +116,12 @@ echo ""
 TAG_NAME="v${PKGVER}"
 if ! git rev-parse "$TAG_NAME" >/dev/null 2>&1; then
     print_msg "$YELLOW" "⚠️  Warning: Git tag $TAG_NAME does not exist"
-    read -p "Create tag $TAG_NAME now? [y/N] " -n 1 -r
-    echo ""
+    if [ "$CONFIRM" = true ]; then
+        REPLY="y"
+    else
+        read -p "Create tag $TAG_NAME now? [y/N] " -n 1 -r
+        echo ""
+    fi
     if [[ $REPLY =~ ^[Yy]$ ]]; then
         git tag -a "$TAG_NAME" -m "Release version ${PKGVER}"
         print_msg "$GREEN" "✓ Created tag $TAG_NAME"
@@ -118,8 +139,12 @@ else
         print_msg "$GREEN" "✓ Tag $TAG_NAME is pushed to remote"
     else
         print_msg "$YELLOW" "⚠️  Warning: Tag $TAG_NAME exists locally but not on remote"
-        read -p "Push tag to remote now? [Y/n] " -n 1 -r
-        echo ""
+        if [ "$CONFIRM" = true ]; then
+            REPLY="Y"
+        else
+            read -p "Push tag to remote now? [Y/n] " -n 1 -r
+            echo ""
+        fi
         if [[ ! $REPLY =~ ^[Nn]$ ]]; then
             git push origin "$TAG_NAME"
             print_msg "$GREEN" "✓ Pushed tag $TAG_NAME to remote"
@@ -167,10 +192,10 @@ echo ""
 
 # Copy files to AUR repo
 print_msg "$BLUE" "📋 Copying PKGBUILD, .SRCINFO, and .install files..."
-cp PKGBUILD .SRCINFO "$AUR_DIR/"
+\cp PKGBUILD .SRCINFO "$AUR_DIR/"
 # Copy .install file if it exists
 if [ -f "obsbot-camera-control.install" ]; then
-    cp obsbot-camera-control.install "$AUR_DIR/"
+    \cp obsbot-camera-control.install "$AUR_DIR/"
 fi
 print_msg "$GREEN" "✓ Files copied"
 echo ""
@@ -205,8 +230,12 @@ echo ""
 print_msg "$YELLOW" "📤 Ready to push to AUR:"
 git log --oneline -1
 echo ""
-read -p "Push to AUR now? [Y/n] " -n 1 -r
-echo ""
+if [ "$CONFIRM" = true ]; then
+    REPLY="Y"
+else
+    read -p "Push to AUR now? [Y/n] " -n 1 -r
+    echo ""
+fi
 
 if [[ $REPLY =~ ^[Nn]$ ]]; then
     print_msg "$YELLOW" "Publish cancelled. Changes are committed locally in $AUR_DIR"

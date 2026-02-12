@@ -89,7 +89,7 @@ private:
     QTimer *m_controlThrottle;
     float m_pendingPan = 0;
     float m_pendingTilt = 0;
-    int m_pendingZoom = 10;
+    int m_pendingZoom = 100;
     int m_pendingFocus = 50;
     bool m_dirtyPanTilt = false;
     bool m_dirtyZoom = false;

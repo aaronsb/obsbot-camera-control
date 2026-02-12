@@ -1,5 +1,6 @@
 #include "CameraController.h"
 #include <QThread>
+#include <QDebug>
 #include <algorithm>
 
 CameraController::CameraController(QObject *parent)
@@ -261,9 +262,12 @@ bool CameraController::setZoom(double zoom)
     // Clamp to valid range (1.0 - 2.0)
     zoom = qBound(1.0, zoom, 2.0);
 
-    bool success = executeCommand("Set Zoom", [this, zoom]() {
-        return m_device->cameraSetZoomAbsoluteR(zoom);
+    uint32_t zoomRatio = static_cast<uint32_t>(zoom * 100);
+    bool success = executeCommand("Set Zoom", [this, zoomRatio]() {
+        return m_device->cameraSetZoomWithSpeedAbsoluteR(zoomRatio, 255);
     });
+
+    qDebug() << "setZoom:" << zoom << "ratio:" << zoomRatio;
 
     if (success) {
         m_currentState.zoom = zoom;

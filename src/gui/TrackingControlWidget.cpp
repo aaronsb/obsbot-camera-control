@@ -131,9 +131,9 @@ TrackingControlWidget::TrackingControlWidget(CameraController *controller, QWidg
     zoomLabel->setFixedWidth(40);
     zoomLayout->addWidget(zoomLabel);
     m_zoomSlider = new QSlider(Qt::Horizontal, this);
-    m_zoomSlider->setMinimum(10);  // 1.0x
-    m_zoomSlider->setMaximum(20);  // 2.0x
-    m_zoomSlider->setValue(10);
+    m_zoomSlider->setMinimum(100);  // 1.00x
+    m_zoomSlider->setMaximum(200);  // 2.00x
+    m_zoomSlider->setValue(100);
     connect(m_zoomSlider, &QSlider::valueChanged, this, &TrackingControlWidget::onZoomChanged);
     zoomLayout->addWidget(m_zoomSlider);
     m_zoomLabel = new QLabel("1.0x", this);
@@ -453,7 +453,7 @@ void TrackingControlWidget::flushPendingCommands()
         m_dirtyPanTilt = false;
     }
     if (m_dirtyZoom) {
-        m_controller->setZoom(m_pendingZoom / 10.0);
+        m_controller->setZoom(m_pendingZoom / 100.0);
         m_dirtyZoom = false;
     }
     if (m_dirtyFocus) {
@@ -493,7 +493,7 @@ void TrackingControlWidget::onZoomChanged(int value)
 {
     m_pendingZoom = value;
     m_dirtyZoom = true;
-    m_zoomLabel->setText(QString("%1x").arg(value / 10.0, 0, 'f', 1));
+    m_zoomLabel->setText(QString("%1x").arg(value / 100.0, 0, 'f', 2));
     scheduleFlush();
 }
 

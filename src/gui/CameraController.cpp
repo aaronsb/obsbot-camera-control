@@ -91,6 +91,14 @@ void CameraController::disconnectFromCamera()
     }
 }
 
+QString CameraController::getVideoDevicePath() const
+{
+    if (m_connected && m_device) {
+        return QString::fromStdString(m_device->videoDevPath());
+    }
+    return QString();
+}
+
 CameraController::CameraState CameraController::getCurrentState()
 {
     if (m_connected && !isSettling()) {

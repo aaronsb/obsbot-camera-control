@@ -80,6 +80,7 @@ public:
     CameraInfo getCameraInfo() const { return m_cameraInfo; }
     void connectToCamera();
     void disconnectFromCamera();
+    QString getVideoDevicePath() const;
 
     // State
     CameraState getCurrentState();

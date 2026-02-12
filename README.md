@@ -1,5 +1,11 @@
 # OBSBOT Control for Linux
 
+![GitHub stars](https://img.shields.io/github/stars/aaronsb/obsbot-camera-control?style=social)
+![GitHub forks](https://img.shields.io/github/forks/aaronsb/obsbot-camera-control?style=social)
+![AUR version](https://img.shields.io/aur/version/obsbot-camera-control?label=AUR)
+![Latest Release](https://img.shields.io/github/v/tag/aaronsb/obsbot-camera-control?label=version)
+![License](https://img.shields.io/github/license/aaronsb/obsbot-camera-control)
+
 A native Qt6 application for controlling OBSBOT cameras on Linux. Provides full camera control with an intuitive GUI while allowing simultaneous use with streaming/conferencing software.
 
 **Primary targets**: OBSBOT Tiny 2, OBSBOT Meet 2

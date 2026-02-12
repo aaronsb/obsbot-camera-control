@@ -41,6 +41,7 @@ public:
     void setVirtualCameraStreamer(VirtualCameraStreamer *streamer);
     void setVideoEffects(const FilterPreviewWidget::VideoEffectsSettings &settings);
     FilterPreviewWidget::VideoEffectsSettings videoEffects() const;
+    void captureSnapshot();
 
 signals:
     void previewStateChanged(bool enabled);
@@ -48,6 +49,7 @@ signals:
     void previewStarted();  // Emitted when preview successfully starts
     void previewFailed(const QString &error);  // Emitted when preview fails to start
     void preferredFormatChanged(const QString &formatId);
+    void snapshotCaptured(const QImage &image);
 
 private slots:
     void onCameraError(QCamera::Error error);

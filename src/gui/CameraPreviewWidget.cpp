@@ -22,6 +22,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <memory>
 
 namespace {
 
@@ -202,6 +203,20 @@ FilterPreviewWidget::VideoEffectsSettings CameraPreviewWidget::videoEffects() co
         return FilterPreviewWidget::VideoEffectsSettings::defaults();
     }
     return m_filterPreviewWidget->videoEffects();
+}
+
+void CameraPreviewWidget::captureSnapshot()
+{
+    if (!m_previewEnabled || !m_filterPreviewWidget) {
+        return;
+    }
+
+    auto conn = std::make_shared<QMetaObject::Connection>();
+    *conn = connect(m_filterPreviewWidget, &FilterPreviewWidget::processedFrameReady,
+                    this, [this, conn](const QImage &image) {
+                        disconnect(*conn);
+                        emit snapshotCaptured(image);
+                    });
 }
 
 void CameraPreviewWidget::startPreview()

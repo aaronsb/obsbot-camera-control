@@ -30,7 +30,12 @@
 #include <QColor>
 #include <QPalette>
 #include <QList>
+#include <QClipboard>
+#include <QDateTime>
+#include <QDir>
+#include <QFile>
 #include <QFileInfo>
+#include <QStandardPaths>
 #include <iostream>
 #include <array>
 #include <algorithm>
@@ -149,6 +154,7 @@ MainWindow::MainWindow(QWidget *parent)
     , m_virtualCameraDeviceEdit(nullptr)
     , m_virtualCameraResolutionCombo(nullptr)
     , m_virtualCameraStatusLabel(nullptr)
+    , m_snapshotDirectoryEdit(nullptr)
     , m_effectsWidget(nullptr)
     , m_virtualCameraStreamer(nullptr)
     , m_isApplyingStyle(false)
@@ -239,6 +245,11 @@ void MainWindow::setupUI()
     previewTitle->setObjectName("previewTitle");
     previewHeader->addWidget(previewTitle);
     previewHeader->addStretch();
+
+    m_snapshotButton = new QPushButton(tr("Snapshot"), m_previewCard);
+    m_snapshotButton->setObjectName("detachButton");
+    m_snapshotButton->setEnabled(false);
+    previewHeader->addWidget(m_snapshotButton);
 
     m_detachPreviewButton = new QPushButton(tr("Pop Out Preview"), m_previewCard);
     m_detachPreviewButton->setObjectName("detachButton");
@@ -431,6 +442,35 @@ void MainWindow::setupUI()
     virtualLayout->addWidget(virtualResolutionHint);
     scrollLayout->addWidget(virtualCameraGroup);
 
+    QGroupBox *snapshotGroup = new QGroupBox(tr("Snapshots"), scrollContent);
+    QVBoxLayout *snapshotLayout = new QVBoxLayout(snapshotGroup);
+    snapshotLayout->setContentsMargins(16, 16, 16, 16);
+    snapshotLayout->setSpacing(10);
+
+    QHBoxLayout *snapshotDirLayout = new QHBoxLayout();
+    snapshotDirLayout->setContentsMargins(0, 0, 0, 0);
+    snapshotDirLayout->setSpacing(8);
+
+    QLabel *snapshotDirLabel = new QLabel(tr("Save to"), snapshotGroup);
+    snapshotDirLayout->addWidget(snapshotDirLabel);
+
+    m_snapshotDirectoryEdit = new QLineEdit(snapshotGroup);
+    m_snapshotDirectoryEdit->setPlaceholderText(
+        QStandardPaths::writableLocation(QStandardPaths::PicturesLocation)
+        + QStringLiteral("/obsbot-control"));
+    connect(m_snapshotDirectoryEdit, &QLineEdit::editingFinished,
+            this, &MainWindow::onSnapshotDirectoryEdited);
+    snapshotDirLayout->addWidget(m_snapshotDirectoryEdit, 1);
+
+    snapshotLayout->addLayout(snapshotDirLayout);
+
+    QLabel *snapshotHint = new QLabel(tr("Snapshots are also copied to the clipboard. Leave blank for the default path shown above."), snapshotGroup);
+    snapshotHint->setWordWrap(true);
+    snapshotHint->setStyleSheet("color: palette(mid); font-size: 11px;");
+    snapshotLayout->addWidget(snapshotHint);
+
+    scrollLayout->addWidget(snapshotGroup);
+
     m_startMinimizedCheckbox = new QCheckBox(tr("Launch minimized / Close to tray"), scrollContent);
     m_startMinimizedCheckbox->setObjectName("footerCheckbox");
     connect(m_startMinimizedCheckbox, &QCheckBox::toggled,
@@ -462,6 +502,10 @@ void MainWindow::setupUI()
             this, &MainWindow::onPreviewFailed);
     connect(m_previewWidget, &CameraPreviewWidget::preferredFormatChanged,
             this, &MainWindow::onPreviewFormatChanged);
+    connect(m_snapshotButton, &QPushButton::clicked,
+            m_previewWidget, &CameraPreviewWidget::captureSnapshot);
+    connect(m_previewWidget, &CameraPreviewWidget::snapshotCaptured,
+            this, &MainWindow::onSnapshotCaptured);
 
     applyModernStyle();
     updateStatusBanner(false);
@@ -781,10 +825,12 @@ void MainWindow::updatePreviewControls()
             m_detachPreviewButton->blockSignals(false);
         }
         m_detachPreviewButton->setEnabled(false);
+        m_snapshotButton->setEnabled(false);
         m_detachPreviewButton->setText(tr("Pop Out Preview"));
         m_previewToggleButton->setText(tr("Start Preview"));
     } else {
         m_detachPreviewButton->setEnabled(true);
+        m_snapshotButton->setEnabled(true);
         if (m_detachPreviewButton->isChecked() != m_previewDetached) {
             m_detachPreviewButton->blockSignals(true);
             m_detachPreviewButton->setChecked(m_previewDetached);
@@ -1120,6 +1166,12 @@ void MainWindow::loadConfiguration()
         m_virtualCameraDeviceEdit->blockSignals(true);
         m_virtualCameraDeviceEdit->setText(QString::fromStdString(settings.virtualCameraDevice));
         m_virtualCameraDeviceEdit->blockSignals(false);
+    }
+
+    if (m_snapshotDirectoryEdit) {
+        m_snapshotDirectoryEdit->blockSignals(true);
+        m_snapshotDirectoryEdit->setText(QString::fromStdString(settings.snapshotDirectory));
+        m_snapshotDirectoryEdit->blockSignals(false);
     }
 
     m_settingsWidget->setWhiteBalanceKelvin(settings.whiteBalanceKelvin);
@@ -1648,4 +1700,56 @@ void MainWindow::onVideoEffectsChanged(const FilterPreviewWidget::VideoEffectsSe
         return;
     }
     m_previewWidget->setVideoEffects(settings);
+}
+
+void MainWindow::onSnapshotCaptured(const QImage &image)
+{
+    if (image.isNull()) {
+        return;
+    }
+
+    // Copy to clipboard
+    QClipboard *clipboard = QApplication::clipboard();
+    clipboard->setImage(image);
+
+    // Save to file
+    auto settings = m_controller->getConfig().getSettings();
+    QString saveDir = QString::fromStdString(settings.snapshotDirectory);
+    if (saveDir.isEmpty()) {
+        saveDir = QStandardPaths::writableLocation(QStandardPaths::PicturesLocation)
+                  + QStringLiteral("/obsbot-control");
+    }
+
+    QDir dir(saveDir);
+    if (!dir.exists()) {
+        dir.mkpath(QStringLiteral("."));
+    }
+
+    QString timestamp = QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd_HHmmss"));
+    QString filePath = saveDir + QStringLiteral("/obsbot_") + timestamp + QStringLiteral(".png");
+
+    // Avoid overwriting if multiple snaps in the same second
+    if (QFile::exists(filePath)) {
+        for (int i = 1; i < 100; ++i) {
+            filePath = saveDir + QStringLiteral("/obsbot_") + timestamp
+                       + QStringLiteral("_") + QString::number(i) + QStringLiteral(".png");
+            if (!QFile::exists(filePath)) {
+                break;
+            }
+        }
+    }
+
+    if (image.save(filePath, "PNG")) {
+        m_statusLabel->setText(tr("Snapshot saved + copied to clipboard: %1").arg(filePath));
+    } else {
+        m_statusLabel->setText(tr("Snapshot copied to clipboard (file save failed)"));
+    }
+}
+
+void MainWindow::onSnapshotDirectoryEdited()
+{
+    auto settings = m_controller->getConfig().getSettings();
+    settings.snapshotDirectory = m_snapshotDirectoryEdit->text().trimmed().toStdString();
+    m_controller->getConfig().setSettings(settings);
+    m_controller->saveConfig();
 }

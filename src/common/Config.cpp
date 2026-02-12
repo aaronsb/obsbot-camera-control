@@ -63,6 +63,7 @@ void Config::setDefaults()
     m_settings.virtualCameraEnabled = false;
     m_settings.virtualCameraDevice = "/dev/video42";
     m_settings.virtualCameraResolution = "match";
+    m_settings.snapshotDirectory = "";  // Empty = XDG Pictures default
 }
 
 std::string Config::getXdgConfigHome() const
@@ -186,7 +187,8 @@ bool Config::load(std::vector<ValidationError> &errors)
         "virtual_camera_enabled",
         "virtual_camera_device",
         "virtual_camera_resolution",
-        "white_balance_kelvin"
+        "white_balance_kelvin",
+        "snapshot_directory"
     };
 
     auto isPresetKey = [](const std::string &key) -> bool {
@@ -564,6 +566,8 @@ bool Config::parseLine(const std::string &line, int lineNumber, std::vector<Vali
             addError(InvalidValue, "virtual_camera_resolution must be 'match' or WIDTHxHEIGHT (e.g. 1280x720)");
             return false;
         }
+    } else if (key == "snapshot_directory") {
+        m_settings.snapshotDirectory = value;
     }
 
     return true;
@@ -789,6 +793,9 @@ bool Config::save()
     file << "virtual_camera_device=" << (m_settings.virtualCameraDevice.empty() ? "/dev/video42" : m_settings.virtualCameraDevice) << "\n";
     file << "# Set 'match' to follow the preview output, or WIDTHxHEIGHT (e.g. 1280x720)\n";
     file << "virtual_camera_resolution=" << (m_settings.virtualCameraResolution.empty() ? "match" : m_settings.virtualCameraResolution) << "\n";
+
+    file << "\n# Snapshot save directory (empty = ~/Pictures/obsbot-control/)\n";
+    file << "snapshot_directory=" << m_settings.snapshotDirectory << "\n";
 
     file.close();
     std::cout << "[Config] Configuration saved successfully to " << configPath << std::endl;

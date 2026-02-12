@@ -62,6 +62,8 @@ private slots:
     void onVirtualCameraResolutionChanged(int index);
     void onVirtualCameraError(const QString &message);
     void onVideoEffectsChanged(const FilterPreviewWidget::VideoEffectsSettings &settings);
+    void onSnapshotCaptured(const QImage &image);
+    void onSnapshotDirectoryEdited();
 
 private:
     void setupUI();
@@ -86,6 +88,7 @@ private:
     // UI
     QPushButton *m_previewToggleButton;
     QPushButton *m_detachPreviewButton;
+    QPushButton *m_snapshotButton;
     QPushButton *m_reconnectButton;
     QLabel *m_deviceInfoLabel;
     QLabel *m_cameraWarningLabel;  // Warning for camera in use
@@ -104,6 +107,7 @@ private:
     QLineEdit *m_virtualCameraDeviceEdit;
     QComboBox *m_virtualCameraResolutionCombo;
     QLabel *m_virtualCameraStatusLabel;
+    QLineEdit *m_snapshotDirectoryEdit;
 
     // Control widgets
     TrackingControlWidget *m_trackingWidget;

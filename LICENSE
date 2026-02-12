@@ -24,12 +24,5 @@ SOFTWARE.
 
 THIRD-PARTY COMPONENTS
 
-This software links against the OBSBOT SDK, which is proprietary software
-owned by OBSBOT. The OBSBOT SDK is located in the sdk/ directory and is
-subject to OBSBOT's license terms and conditions.
-
-The OBSBOT SDK is NOT covered by the MIT license above. Users must comply
-with OBSBOT's licensing requirements when using this software.
-
-This application is an unofficial third-party tool and is not affiliated with,
-endorsed by, or supported by OBSBOT.
+The OBSBOT SDK (sdk/) is distributed by OBSBOT without a license.
+It is not covered by the MIT license above.

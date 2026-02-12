@@ -43,6 +43,8 @@ add_executable(obsbot-gui
     src/gui/VirtualCameraStreamer.h
     src/gui/PreviewWindow.cpp
     src/gui/PreviewWindow.h
+    src/gui/XYPad.cpp
+    src/gui/XYPad.h
     src/common/Config.cpp
     src/common/Config.h
     resources/resources.qrc
@@ -63,6 +65,10 @@ target_link_libraries(obsbot-gui PRIVATE
     Qt6::MultimediaWidgets
     Qt6::OpenGLWidgets
     dev
+)
+
+target_compile_definitions(obsbot-gui PRIVATE
+    $<$<CONFIG:Debug>:OBSBOT_DEBUG_GEOMETRY>
 )
 
 # CLI Application

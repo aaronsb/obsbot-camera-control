@@ -158,6 +158,7 @@ MainWindow::MainWindow(QWidget *parent)
     , m_effectsWidget(nullptr)
     , m_virtualCameraStreamer(nullptr)
     , m_isApplyingStyle(false)
+    , m_snapshotToClipboard(false)
     , m_virtualCameraErrorNotified(false)
     , m_virtualCameraAvailable(false)
 {
@@ -184,8 +185,6 @@ MainWindow::MainWindow(QWidget *parent)
     setupUI();
     setupTrayIcon();
 
-    m_lastDockedSize = size();
-
     // Load configuration
     loadConfiguration();
 
@@ -196,6 +195,14 @@ MainWindow::MainWindow(QWidget *parent)
             hide();
         });
     }
+
+#ifdef OBSBOT_DEBUG_GEOMETRY
+    QTimer::singleShot(0, this, [this]() {
+        qDebug() << "STARTUP: main window" << size() << "pos" << pos()
+                 << "splitter" << m_splitter->sizes()
+                 << "popout: n/a";
+    });
+#endif
 
     // Start connecting to camera
     m_controller->connectToCamera();
@@ -251,6 +258,12 @@ void MainWindow::setupUI()
     m_snapshotButton->setEnabled(false);
     previewHeader->addWidget(m_snapshotButton);
 
+    m_copyClipboardButton = new QPushButton(tr("Copy"), m_previewCard);
+    m_copyClipboardButton->setObjectName("copyClipboardButton");
+    m_copyClipboardButton->setToolTip(tr("Copy current frame to clipboard"));
+    m_copyClipboardButton->setEnabled(false);
+    previewHeader->addWidget(m_copyClipboardButton);
+
     m_detachPreviewButton = new QPushButton(tr("Pop Out Preview"), m_previewCard);
     m_detachPreviewButton->setObjectName("detachButton");
     m_detachPreviewButton->setCheckable(true);
@@ -290,9 +303,8 @@ void MainWindow::setupUI()
     // Control column (scrollable so window can be smaller)
     m_controlCard = new QFrame(m_splitter);
     m_controlCard->setObjectName("controlCard");
-    m_controlCard->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Expanding);
-    m_controlCard->setMinimumWidth(380);
-    m_controlCard->setMaximumWidth(480);
+    m_controlCard->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Expanding);
+    m_controlCard->setMinimumWidth(340);
 
     QVBoxLayout *controlLayout = new QVBoxLayout(m_controlCard);
     controlLayout->setContentsMargins(0, 0, 0, 0);
@@ -379,9 +391,28 @@ void MainWindow::setupUI()
     m_effectsWidget = new VideoEffectsWidget(this);
     connect(m_effectsWidget, &VideoEffectsWidget::effectsChanged,
             this, &MainWindow::onVideoEffectsChanged);
+    // Mirror checkbox in tracking tab syncs with Creative FX horizontal flip
+    connect(m_trackingWidget, &TrackingControlWidget::mirrorToggled,
+            this, [this](bool mirrored) {
+                auto settings = m_effectsWidget->settings();
+                settings.horizontalFlip = mirrored;
+                m_effectsWidget->applySettings(settings);
+            });
     m_tabWidget->addTab(m_effectsWidget, tr("Creative FX"));
     scrollLayout->addWidget(m_tabWidget);
     m_effectsWidget->reset();
+
+    // Resize tab widget to fit the current tab (QTabWidget normally sizes to the tallest)
+    auto fitTabToCurrentPage = [this]() {
+        QWidget *page = m_tabWidget->currentWidget();
+        if (!page) return;
+        m_tabWidget->setMaximumHeight(
+            page->sizeHint().height() + m_tabWidget->tabBar()->sizeHint().height());
+    };
+    connect(m_tabWidget, &QTabWidget::currentChanged, this, [fitTabToCurrentPage](int) {
+        fitTabToCurrentPage();
+    });
+    QTimer::singleShot(0, this, fitTabToCurrentPage);
 
     QGroupBox *virtualCameraGroup = new QGroupBox(tr("Virtual Camera"), scrollContent);
     QVBoxLayout *virtualLayout = new QVBoxLayout(virtualCameraGroup);
@@ -464,12 +495,14 @@ void MainWindow::setupUI()
 
     snapshotLayout->addLayout(snapshotDirLayout);
 
-    QLabel *snapshotHint = new QLabel(tr("Snapshots are also copied to the clipboard. Leave blank for the default path shown above."), snapshotGroup);
+    QLabel *snapshotHint = new QLabel(tr("Use Copy to also place the image on the clipboard. Leave blank for the default path shown above."), snapshotGroup);
     snapshotHint->setWordWrap(true);
     snapshotHint->setStyleSheet("color: palette(mid); font-size: 11px;");
     snapshotLayout->addWidget(snapshotHint);
 
     scrollLayout->addWidget(snapshotGroup);
+
+    scrollLayout->addStretch();
 
     m_startMinimizedCheckbox = new QCheckBox(tr("Launch minimized / Close to tray"), scrollContent);
     m_startMinimizedCheckbox->setObjectName("footerCheckbox");
@@ -502,8 +535,14 @@ void MainWindow::setupUI()
             this, &MainWindow::onPreviewFailed);
     connect(m_previewWidget, &CameraPreviewWidget::preferredFormatChanged,
             this, &MainWindow::onPreviewFormatChanged);
-    connect(m_snapshotButton, &QPushButton::clicked,
-            m_previewWidget, &CameraPreviewWidget::captureSnapshot);
+    connect(m_snapshotButton, &QPushButton::clicked, this, [this]() {
+        m_snapshotToClipboard = false;
+        m_previewWidget->captureSnapshot();
+    });
+    connect(m_copyClipboardButton, &QPushButton::clicked, this, [this]() {
+        m_snapshotToClipboard = true;
+        m_previewWidget->captureSnapshot();
+    });
     connect(m_previewWidget, &CameraPreviewWidget::snapshotCaptured,
             this, &MainWindow::onSnapshotCaptured);
 
@@ -514,8 +553,8 @@ void MainWindow::setupUI()
     m_previewCardMinWidth = m_previewCard->minimumWidth();
     m_previewCardMaxWidth = m_previewCard->maximumWidth();
     m_dockedMinWidth = sizeHint().width();
-    // Minimum 840×480: fits 640×480 preview + 200px controls + margins/splitter
-    const int minWindowWidth = 840;
+    // Minimum 720×480: preview + controls + margins/splitter
+    const int minWindowWidth = 720;
     const int minWindowHeight = 480;
     setMinimumSize(std::max(m_dockedMinWidth, minWindowWidth), minWindowHeight);
     setMaximumWidth(QWIDGETSIZE_MAX);
@@ -719,7 +758,12 @@ void MainWindow::detachPreviewToWindow()
         return;
     }
 
-    m_lastDockedSize = size();
+    m_preDetachSize = size();
+    m_preDetachSplitter = m_splitter->sizes();
+
+#ifdef OBSBOT_DEBUG_GEOMETRY
+    qDebug() << "DETACH: saving" << m_preDetachSize << "splitter" << m_preDetachSplitter;
+#endif
 
     if (m_previewStack->indexOf(m_previewWidget) != -1) {
         m_previewStack->removeWidget(m_previewWidget);
@@ -748,6 +792,11 @@ void MainWindow::detachPreviewToWindow()
     resize(targetWidth, height());
     m_widthLocked = true;
     m_previewDetached = true;
+
+#ifdef OBSBOT_DEBUG_GEOMETRY
+    qDebug() << "DETACH done: main window" << size() << "pos" << pos()
+             << "popout" << m_previewWindow->size() << "pos" << m_previewWindow->pos();
+#endif
 }
 
 void MainWindow::attachPreviewToPanel()
@@ -765,9 +814,13 @@ void MainWindow::attachPreviewToPanel()
         if (m_previewStack->indexOf(m_previewWidget) == -1) {
             m_previewStack->insertWidget(0, m_previewWidget);
         }
-        m_lastDockedSize = size();
         return;
     }
+
+#ifdef OBSBOT_DEBUG_GEOMETRY
+    qDebug() << "ATTACH: main window before" << size() << "pos" << pos()
+             << "popout" << m_previewWindow->size() << "pos" << m_previewWindow->pos();
+#endif
 
     CameraPreviewWidget *widget = m_previewWindow->takePreviewWidget();
     if (!widget) {
@@ -785,9 +838,6 @@ void MainWindow::attachPreviewToPanel()
     m_previewCard->setMinimumWidth(m_previewCardMinWidth);
     m_previewCard->setMaximumWidth(m_previewCardMaxWidth);
     m_previewCard->show();
-    QList<int> sizes;
-    sizes << m_previewCardMinWidth + 40 << m_controlCard->sizeHint().width();
-    m_splitter->setSizes(sizes);
 
     if (m_previewToggleButton->isChecked()) {
         m_previewStack->setCurrentWidget(widget);
@@ -796,20 +846,30 @@ void MainWindow::attachPreviewToPanel()
     }
 
     if (m_widthLocked) {
-        m_widthLocked = false;
         setMinimumWidth(m_dockedMinWidth);
         setMaximumWidth(QWIDGETSIZE_MAX);
-        const int targetWidth = m_lastDockedSize.width() > 0
-            ? std::max(m_lastDockedSize.width(), m_dockedMinWidth)
-            : std::max(width(), m_dockedMinWidth);
-        const int targetHeight = m_lastDockedSize.height() > 0
-            ? m_lastDockedSize.height()
-            : height();
-        resize(targetWidth, targetHeight);
     }
-
+    m_widthLocked = false;
     m_previewDetached = false;
-    m_lastDockedSize = size();
+
+#ifdef OBSBOT_DEBUG_GEOMETRY
+    qDebug() << "ATTACH: main window after layout" << size()
+             << "will restore to" << m_preDetachSize << "splitter" << m_preDetachSplitter;
+#endif
+
+    QSize targetSize = m_preDetachSize;
+    QList<int> targetSplitter = m_preDetachSplitter;
+    QTimer::singleShot(50, this, [this, targetSize, targetSplitter]() {
+        if (targetSize.isValid()) {
+            resize(targetSize);
+        }
+        if (!targetSplitter.isEmpty()) {
+            m_splitter->setSizes(targetSplitter);
+        }
+#ifdef OBSBOT_DEBUG_GEOMETRY
+        qDebug() << "ATTACH: restored to" << size() << "splitter" << m_splitter->sizes();
+#endif
+    });
 }
 
 void MainWindow::updatePreviewControls()
@@ -826,11 +886,13 @@ void MainWindow::updatePreviewControls()
         }
         m_detachPreviewButton->setEnabled(false);
         m_snapshotButton->setEnabled(false);
+        m_copyClipboardButton->setEnabled(false);
         m_detachPreviewButton->setText(tr("Pop Out Preview"));
         m_previewToggleButton->setText(tr("Start Preview"));
     } else {
         m_detachPreviewButton->setEnabled(true);
         m_snapshotButton->setEnabled(true);
+        m_copyClipboardButton->setEnabled(true);
         if (m_detachPreviewButton->isChecked() != m_previewDetached) {
             m_detachPreviewButton->blockSignals(true);
             m_detachPreviewButton->setChecked(m_previewDetached);
@@ -1324,10 +1386,23 @@ void MainWindow::changeEvent(QEvent *event)
 
 void MainWindow::resizeEvent(QResizeEvent *event)
 {
-    if (!m_previewDetached && !m_widthLocked) {
-        m_lastDockedSize = event->size();
-    }
     QMainWindow::resizeEvent(event);
+
+#ifdef OBSBOT_DEBUG_GEOMETRY
+    // Debounce: only log once resizing settles (150ms idle)
+    static QTimer *debounce = nullptr;
+    if (!debounce) {
+        debounce = new QTimer(this);
+        debounce->setSingleShot(true);
+        debounce->setInterval(150);
+        connect(debounce, &QTimer::timeout, this, [this]() {
+            qDebug() << "RESIZE settled: main window" << size() << "pos" << pos()
+                     << "splitter" << m_splitter->sizes()
+                     << "detached:" << m_previewDetached << "locked:" << m_widthLocked;
+        });
+    }
+    debounce->start();
+#endif
 }
 
 void MainWindow::onPreviewStarted()
@@ -1700,6 +1775,7 @@ void MainWindow::onVideoEffectsChanged(const FilterPreviewWidget::VideoEffectsSe
         return;
     }
     m_previewWidget->setVideoEffects(settings);
+    m_trackingWidget->setMirrored(settings.horizontalFlip);
 }
 
 void MainWindow::onSnapshotCaptured(const QImage &image)
@@ -1708,9 +1784,9 @@ void MainWindow::onSnapshotCaptured(const QImage &image)
         return;
     }
 
-    // Copy to clipboard
-    QClipboard *clipboard = QApplication::clipboard();
-    clipboard->setImage(image);
+    if (m_snapshotToClipboard) {
+        QApplication::clipboard()->setImage(image);
+    }
 
     // Save to file
     auto settings = m_controller->getConfig().getSettings();
@@ -1722,7 +1798,7 @@ void MainWindow::onSnapshotCaptured(const QImage &image)
 
     QDir dir(saveDir);
     if (!dir.exists() && !dir.mkpath(QStringLiteral("."))) {
-        m_statusLabel->setText(tr("Snapshot copied to clipboard (cannot create %1)").arg(saveDir));
+        m_statusLabel->setText(tr("Cannot create snapshot directory: %1").arg(saveDir));
         return;
     }
 
@@ -1736,9 +1812,12 @@ void MainWindow::onSnapshotCaptured(const QImage &image)
     }
 
     if (image.save(filePath, "PNG")) {
-        m_statusLabel->setText(tr("Snapshot saved + copied to clipboard: %1").arg(filePath));
+        QString msg = m_snapshotToClipboard
+            ? tr("Copied to clipboard + saved: %1").arg(filePath)
+            : tr("Snapshot saved: %1").arg(filePath);
+        m_statusLabel->setText(msg);
     } else {
-        m_statusLabel->setText(tr("Snapshot copied to clipboard (file save failed)"));
+        m_statusLabel->setText(tr("Snapshot file save failed"));
     }
 }
 

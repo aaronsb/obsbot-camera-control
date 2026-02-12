@@ -78,15 +78,24 @@ private:
     XYPad *m_xyPad;
     QCheckBox *m_invertControlsCheckBox;
     QCheckBox *m_mirrorCheckBox;
-    QTimer *m_panTiltTimer;     // Throttle pan/tilt commands
-    float m_pendingPan = 0;
-    float m_pendingTilt = 0;
     QSlider *m_zoomSlider;
     QLabel *m_zoomLabel;
     QSlider *m_focusSlider;
     QLabel *m_focusLabel;
     QLabel *m_positionLabel;
     QWidget *m_ptzContainer;
+
+    // Unified command throttle — coalesces all manual control changes
+    QTimer *m_controlThrottle;
+    float m_pendingPan = 0;
+    float m_pendingTilt = 0;
+    int m_pendingZoom = 10;
+    int m_pendingFocus = 50;
+    bool m_dirtyPanTilt = false;
+    bool m_dirtyZoom = false;
+    bool m_dirtyFocus = false;
+    void flushPendingCommands();
+    void scheduleFlush();
 
     void updateTiny2Visibility();
     void updatePTZControlsState();

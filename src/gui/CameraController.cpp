@@ -133,8 +133,7 @@ bool CameraController::enableAutoFraming(bool enabled)
         });
 
         // Restore auto focus when auto-framing is enabled
-        m_device->cameraSetFocusAbsolute(0, true);
-        m_currentState.autoFocusEnabled = true;
+        setFocusAbsolute(0, true);
 
         m_currentState.autoFramingEnabled = true;
         emit stateChanged(m_currentState);
@@ -145,8 +144,7 @@ bool CameraController::enableAutoFraming(bool enabled)
         });
         if (success) {
             // Switch to manual focus when auto-framing is disabled
-            m_device->cameraSetFocusAbsolute(m_currentState.manualFocusValue, false);
-            m_currentState.autoFocusEnabled = false;
+            setFocusAbsolute(m_currentState.manualFocusValue, false);
 
             m_currentState.autoFramingEnabled = false;
             emit stateChanged(m_currentState);

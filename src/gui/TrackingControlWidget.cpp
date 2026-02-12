@@ -11,13 +11,11 @@ TrackingControlWidget::TrackingControlWidget(CameraController *controller, QWidg
     m_commandTimer = new QTimer(this);
     m_commandTimer->setSingleShot(true);
 
-    // Throttle pan/tilt to avoid flooding the camera with commands
-    m_panTiltTimer = new QTimer(this);
-    m_panTiltTimer->setSingleShot(true);
-    m_panTiltTimer->setInterval(100);
-    connect(m_panTiltTimer, &QTimer::timeout, this, [this]() {
-        m_controller->setPanTilt(m_pendingPan, m_pendingTilt);
-    });
+    // Unified throttle for all manual controls (pan/tilt, zoom, focus)
+    m_controlThrottle = new QTimer(this);
+    m_controlThrottle->setSingleShot(true);
+    m_controlThrottle->setInterval(100);
+    connect(m_controlThrottle, &QTimer::timeout, this, &TrackingControlWidget::flushPendingCommands);
 
     m_tiny2Capabilities = m_controller->hasTiny2Capabilities();
 
@@ -448,7 +446,31 @@ void TrackingControlWidget::updatePTZControlsState()
     m_ptzContainer->setEnabled(enabled);
 }
 
-// XY pad pan/tilt control — throttled to prevent command flooding
+void TrackingControlWidget::flushPendingCommands()
+{
+    if (m_dirtyPanTilt) {
+        m_controller->setPanTilt(m_pendingPan, m_pendingTilt);
+        m_dirtyPanTilt = false;
+    }
+    if (m_dirtyZoom) {
+        m_controller->setZoom(m_pendingZoom / 10.0);
+        m_dirtyZoom = false;
+    }
+    if (m_dirtyFocus) {
+        m_controller->setFocusAbsolute(m_pendingFocus, false);
+        m_dirtyFocus = false;
+    }
+}
+
+void TrackingControlWidget::scheduleFlush()
+{
+    // First change fires immediately, subsequent ones coalesce at 100ms
+    if (!m_controlThrottle->isActive()) {
+        flushPendingCommands();
+        m_controlThrottle->start();
+    }
+}
+
 void TrackingControlWidget::onXYPadChanged(float x, float y)
 {
     if (m_invertControlsCheckBox->isChecked()) {
@@ -458,30 +480,29 @@ void TrackingControlWidget::onXYPadChanged(float x, float y)
 
     m_pendingPan = x;
     m_pendingTilt = y;
+    m_dirtyPanTilt = true;
 
-    // Update label immediately for responsive UI
     m_positionLabel->setText(QString("Position: Pan %1, Tilt %2")
         .arg(x, 0, 'f', 2)
         .arg(y, 0, 'f', 2));
 
-    // Send command immediately if timer isn't running, otherwise let it coalesce
-    if (!m_panTiltTimer->isActive()) {
-        m_controller->setPanTilt(x, y);
-        m_panTiltTimer->start();
-    }
+    scheduleFlush();
 }
 
 void TrackingControlWidget::onZoomChanged(int value)
 {
-    double zoom = value / 10.0;  // 10-20 -> 1.0-2.0
-    m_controller->setZoom(zoom);
-    m_zoomLabel->setText(QString("%1x").arg(zoom, 0, 'f', 1));
+    m_pendingZoom = value;
+    m_dirtyZoom = true;
+    m_zoomLabel->setText(QString("%1x").arg(value / 10.0, 0, 'f', 1));
+    scheduleFlush();
 }
 
 void TrackingControlWidget::onFocusChanged(int value)
 {
-    m_controller->setFocusAbsolute(value, false);
+    m_pendingFocus = value;
+    m_dirtyFocus = true;
     m_focusLabel->setText(QString::number(value));
+    scheduleFlush();
 }
 
 void TrackingControlWidget::setMirrored(bool mirrored)

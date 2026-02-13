@@ -207,6 +207,11 @@ MainWindow::~MainWindow()
     }
 }
 
+bool MainWindow::isStartingMinimized() const
+{
+    return m_controller->getConfig().getSettings().startMinimized;
+}
+
 void MainWindow::setupUI()
 {
     QWidget *centralWidget = new QWidget(this);
@@ -1447,7 +1452,7 @@ void MainWindow::onShowHideAction()
             });
         }
 
-        show();
+        showNormal();
         activateWindow();
         raise();
     }

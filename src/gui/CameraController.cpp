@@ -91,6 +91,14 @@ void CameraController::disconnectFromCamera()
     }
 }
 
+QString CameraController::getVideoDevicePath() const
+{
+    if (m_connected && m_device) {
+        return QString::fromStdString(m_device->videoDevPath());
+    }
+    return QString();
+}
+
 CameraController::CameraState CameraController::getCurrentState()
 {
     if (m_connected && !isSettling()) {
@@ -124,6 +132,9 @@ bool CameraController::enableAutoFraming(bool enabled)
             });
         });
 
+        // Restore auto focus when auto-framing is enabled
+        setFocusAbsolute(0, true);
+
         m_currentState.autoFramingEnabled = true;
         emit stateChanged(m_currentState);
         return true;  // First command succeeded, second is pending
@@ -132,6 +143,9 @@ bool CameraController::enableAutoFraming(bool enabled)
             return m_device->cameraSetMediaModeU(Device::MediaModeNormal);
         });
         if (success) {
+            // Switch to manual focus when auto-framing is disabled
+            setFocusAbsolute(m_currentState.manualFocusValue, false);
+
             m_currentState.autoFramingEnabled = false;
             emit stateChanged(m_currentState);
         }
@@ -308,6 +322,21 @@ bool CameraController::setFaceFocus(bool enabled)
     });
 }
 
+bool CameraController::setFocusAbsolute(int position, bool autoFocus)
+{
+    if (!m_connected) return false;
+    position = qBound(0, position, 100);
+    bool success = executeCommand("Set Focus", [this, position, autoFocus]() {
+        return m_device->cameraSetFocusAbsolute(position, autoFocus);
+    });
+    if (success) {
+        m_currentState.autoFocusEnabled = autoFocus;
+        m_currentState.manualFocusValue = position;
+        emit stateChanged(m_currentState);
+    }
+    return success;
+}
+
 bool CameraController::setBrightness(int value)
 {
     if (!m_connected) return false;
@@ -469,6 +498,7 @@ void CameraController::updateState()
     m_currentState.faceAEEnabled = status.tiny.face_ae;
     m_currentState.faceFocusEnabled = status.tiny.face_auto_focus;
     m_currentState.autoFocusEnabled = status.tiny.auto_focus;
+    m_currentState.manualFocusValue = status.tiny.manual_focus_value;
     m_currentState.fovMode = status.tiny.fov;
     m_currentState.devStatus = status.tiny.dev_status;
     m_currentState.autoFramingEnabled = (m_currentState.aiMode != Device::AiWorkModeNone);

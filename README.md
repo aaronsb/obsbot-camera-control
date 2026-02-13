@@ -1,9 +1,15 @@
 # OBSBOT Control for Linux
 
+![GitHub stars](https://img.shields.io/github/stars/aaronsb/obsbot-camera-control?style=social)
+![GitHub forks](https://img.shields.io/github/forks/aaronsb/obsbot-camera-control?style=social)
+![AUR version](https://img.shields.io/aur/version/obsbot-camera-control?label=AUR)
+![Latest Release](https://img.shields.io/github/v/tag/aaronsb/obsbot-camera-control?label=version)
+![License](https://img.shields.io/github/license/aaronsb/obsbot-camera-control)
+
 A native Qt6 application for controlling OBSBOT cameras on Linux. Provides full camera control with an intuitive GUI while allowing simultaneous use with streaming/conferencing software.
 
-**Primary testing**: OBSBOT Meet 2
-**Also works with**: OBSBOT Tiny 4K (partial feature support - see [Compatibility](#compatibility))
+**Primary targets**: OBSBOT Tiny 2, OBSBOT Meet 2
+**Community-tested**: Tiny 2 Lite, Tiny 4K, Meet SE (see [Compatibility](#compatibility))
 
 ## Screenshots
 
@@ -55,31 +61,15 @@ OBSBOT cameras have excellent Linux UVC support, but lack native control softwar
 
 ## Compatibility
 
-This application was developed and tested primarily with the **OBSBOT Meet 2**, but has been reported to work with other OBSBOT models with varying feature support.
+| Camera | Status | Notes |
+|--------|--------|-------|
+| **OBSBOT Tiny 2** | Full | Primary development target. All features supported. |
+| **OBSBOT Meet 2** | Full | All features supported. |
+| **OBSBOT Tiny 2 Lite** | Partial | Detection works. Preview device path needs SDK fix. ([#8](https://github.com/aaronsb/obsbot-camera-control/issues/8)) |
+| **OBSBOT Tiny 4K** | Partial | PTZ, HDR, manual image controls work. Auto-framing and face AE/focus don't. ([#13](https://github.com/aaronsb/obsbot-camera-control/issues/13), [#7](https://github.com/aaronsb/obsbot-camera-control/issues/7)) |
+| **OBSBOT Meet SE** | Partial | Basic compatibility confirmed. ([#9](https://github.com/aaronsb/obsbot-camera-control/issues/9)) |
 
-### OBSBOT Meet 2 ✅
-- **Fully tested** - All features supported
-- PTZ controls, Auto-Framing, HDR, Face AE/Focus, all image controls
-
-### OBSBOT Tiny 4K ⚠️
-**What works:**
-- ✅ PTZ controls (Pan, Tilt, Zoom)
-- ✅ HDR
-- ✅ Manual image controls (Brightness, Contrast, Saturation)
-- ✅ White Balance
-
-**What doesn't work:**
-- ❌ Auto-Framing (can be enabled via camera gestures, but not from app)
-- ❌ Face-based Auto Exposure
-- ❌ Face-based Auto Focus (works via Cameractrl though)
-- ❌ Auto image controls
-
-*Tested and reported by: [samdark](https://github.com/aaronsb/obsbot-camera-control/issues/7)*
-
-### Other Models
-Other OBSBOT cameras may work with varying degrees of functionality. The SDK supports multiple product types (Tiny, Tiny 2, Tail Air, Me, etc.), but testing is needed.
-
-**Have another model?** Please [open an issue](https://github.com/aaronsb/obsbot-camera-control/issues) to report compatibility!
+The SDK also lists: Tiny (original), Tiny SE, Meet (original), Meet 4K, Me, Tail Air, Tail 2, Tail 2S, HDMI Box, NDI Box. These are untested — if you have one, [open a compatibility report](https://github.com/aaronsb/obsbot-camera-control/issues/new?template=device_compatibility.md).
 
 ## Requirements
 
@@ -106,7 +96,7 @@ Other OBSBOT cameras may work with varying degrees of functionality. The SDK sup
 For the adventurous, a single command that clones the repo to `~/src/obsbot-camera-control` and builds/installs:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/aaronsb/obsbot-camera-control/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/aaronsb/obsbot-camera-control/main/local-install.sh | bash
 ```
 
 ⚠️ **What this does:**
@@ -301,17 +291,14 @@ obsbot-camera-control/
 │   ├── gui/           # Qt6 GUI application
 │   ├── cli/           # Command-line interface
 │   └── common/        # Shared configuration code
-├── sdk/               # OBSBOT SDK (proprietary)
+├── sdk/               # OBSBOT SDK (closed-source library + headers)
 ├── resources/         # Icons and resources
 └── CMakeLists.txt     # Build configuration
 ```
 
 ## Contributing
 
-This is a personal project but contributions are welcome:
-- Bug reports and feature requests: Open an issue
-- Pull requests: Please discuss major changes first
-- Code style: Follow existing Qt/C++ conventions
+Contributions welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for build instructions, code style, and project structure.
 
 ## Credits
 
@@ -321,24 +308,6 @@ This is a personal project but contributions are welcome:
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+MIT License — see [LICENSE](LICENSE) for details.
 
-**Important:** The application code (src/) is MIT licensed, but it links against the
-OBSBOT SDK (sdk/), which is proprietary software owned by OBSBOT. The SDK appears to
-have been released without an explicit license and is likely intended for reference use.
-
-Users of this software must comply with any applicable OBSBOT licensing terms.
-
-## Disclaimer
-
-This is an unofficial third-party application. Not affiliated with or endorsed by OBSBOT.
-
-The OBSBOT SDK was likely released as a minimal reference implementation for Linux support.
-This project extends that foundation into a full-featured graphical application, but makes
-no warranty about compatibility or support from OBSBOT.
-
----
-
-**Made with ❤️ for the Linux community**
-
-*Because Linux users deserve native camera control too.*
+The OBSBOT SDK (`sdk/`) is distributed by OBSBOT without a license. This is an unofficial third-party application, not affiliated with or endorsed by OBSBOT.

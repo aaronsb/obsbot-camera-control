@@ -48,6 +48,7 @@ public:
         bool faceAEEnabled;
         bool faceFocusEnabled;
         bool autoFocusEnabled;
+        int manualFocusValue;  // 0-100, motor position when in manual focus
 
         // Image controls
         bool brightnessAuto; // Auto mode for brightness
@@ -80,6 +81,7 @@ public:
     CameraInfo getCameraInfo() const { return m_cameraInfo; }
     void connectToCamera();
     void disconnectFromCamera();
+    QString getVideoDevicePath() const;
 
     // State
     CameraState getCurrentState();
@@ -104,6 +106,7 @@ public:
     bool setFOV(int fovMode);  // 0=Wide, 1=Medium, 2=Narrow
     bool setFaceAE(bool enabled);
     bool setFaceFocus(bool enabled);
+    bool setFocusAbsolute(int position, bool autoFocus);
 
     // Image controls
     void setBrightnessAuto(bool enabled) { m_currentState.brightnessAuto = enabled; }

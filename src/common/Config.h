@@ -76,6 +76,7 @@ public:
         bool virtualCameraEnabled;
         std::string virtualCameraDevice;
         std::string virtualCameraResolution;
+        std::string snapshotDirectory;    // Save path for snapshots (empty = XDG default)
     };
 
     Config();

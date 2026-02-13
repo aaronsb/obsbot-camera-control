@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Troubleshooting Guide
+    url: https://github.com/aaronsb/obsbot-camera-control#troubleshooting
+    about: Check here first if something isn't working
+  - name: Build Instructions
+    url: https://github.com/aaronsb/obsbot-camera-control/blob/main/docs/BUILD.md
+    about: Detailed build and dependency info

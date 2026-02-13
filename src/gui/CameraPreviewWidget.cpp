@@ -78,6 +78,11 @@ CameraPreviewWidget::CameraPreviewWidget(QWidget *parent)
 
 CameraPreviewWidget::~CameraPreviewWidget()
 {
+    // Disconnect all signals from FilterPreviewWidget before stopping,
+    // otherwise processedFrameReady can fire into our partially-destroyed lambda
+    if (m_filterPreviewWidget) {
+        m_filterPreviewWidget->disconnect(this);
+    }
     stopPreview();
 }
 
@@ -204,6 +209,22 @@ FilterPreviewWidget::VideoEffectsSettings CameraPreviewWidget::videoEffects() co
     return m_filterPreviewWidget->videoEffects();
 }
 
+void CameraPreviewWidget::captureSnapshot()
+{
+    if (!m_previewEnabled || !m_filterPreviewWidget) {
+        return;
+    }
+
+    // Cancel any pending snapshot before arming a new one
+    disconnect(m_snapshotConnection);
+
+    m_snapshotConnection = connect(m_filterPreviewWidget, &FilterPreviewWidget::processedFrameReady,
+                    this, [this](const QImage &image) {
+                        disconnect(m_snapshotConnection);
+                        emit snapshotCaptured(image);
+                    });
+}
+
 void CameraPreviewWidget::startPreview()
 {
     if (m_previewEnabled) {
@@ -234,6 +255,8 @@ void CameraPreviewWidget::startPreview()
 
 void CameraPreviewWidget::stopPreview()
 {
+    disconnect(m_snapshotConnection);
+
     if (m_videoSink) {
         disconnect(m_videoSink, nullptr, this, nullptr);
         delete m_videoSink;

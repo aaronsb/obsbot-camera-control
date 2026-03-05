@@ -23,6 +23,7 @@ public:
     explicit CameraSettingsWidget(CameraController *controller, QWidget *parent = nullptr);
 
     void updateFromState(const CameraController::CameraState &state);
+    void setV4l2Mode(bool v4l2Only);
 
     // Getters for current UI state
     bool isHDREnabled() const { return m_hdrCheckBox->isChecked(); }
@@ -153,6 +154,8 @@ private:
     void applyControlRanges();
     void updateWhiteBalanceControls(int mode);
     void updateWhiteBalanceKelvinLabel(int value);
+
+    QGroupBox *m_advancedGroupBox;
 };
 
 #endif // CAMERASETTINGSWIDGET_H

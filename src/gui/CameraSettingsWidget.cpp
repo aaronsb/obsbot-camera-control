@@ -16,8 +16,8 @@ CameraSettingsWidget::CameraSettingsWidget(CameraController *controller, QWidget
     layout->setContentsMargins(8, 14, 8, 14);
     layout->setSpacing(14);
 
-    QGroupBox *groupBox = new QGroupBox("Advanced Camera Settings", this);
-    QVBoxLayout *groupLayout = new QVBoxLayout(groupBox);
+    m_advancedGroupBox = new QGroupBox("Advanced Camera Settings", this);
+    QVBoxLayout *groupLayout = new QVBoxLayout(m_advancedGroupBox);
     groupLayout->setContentsMargins(16, 16, 16, 16);
     groupLayout->setSpacing(10);
 
@@ -53,7 +53,7 @@ CameraSettingsWidget::CameraSettingsWidget(CameraController *controller, QWidget
     connect(m_faceFocusCheckBox, &QCheckBox::toggled, this, &CameraSettingsWidget::onFaceFocusToggled);
     groupLayout->addWidget(m_faceFocusCheckBox);
 
-    layout->addWidget(groupBox);
+    layout->addWidget(m_advancedGroupBox);
 
     // Image Controls Group
     QGroupBox *imageGroupBox = new QGroupBox("Image Controls", this);
@@ -419,6 +419,11 @@ void CameraSettingsWidget::updateWhiteBalanceControls(int mode)
     const bool enableManual = manualSelected && rangeAvailable;
     m_whiteBalanceKelvinSlider->setEnabled(enableManual);
     m_whiteBalanceKelvinLabel->setEnabled(enableManual);
+}
+
+void CameraSettingsWidget::setV4l2Mode(bool v4l2Only)
+{
+    m_advancedGroupBox->setVisible(!v4l2Only);
 }
 
 void CameraSettingsWidget::updateWhiteBalanceKelvinLabel(int value)

@@ -26,6 +26,7 @@ public:
     explicit TrackingControlWidget(CameraController *controller, QWidget *parent = nullptr);
 
     void updateFromState(const CameraController::CameraState &state);
+    void setV4l2Mode(bool v4l2Only);
     bool isTrackingEnabled() const { return m_trackingCheckBox->isChecked(); }
     void setTrackingEnabled(bool enabled) {
         m_trackingCheckBox->blockSignals(true);
@@ -99,6 +100,8 @@ private:
 
     void updateTiny2Visibility();
     void updatePTZControlsState();
+
+    QGroupBox *m_trackingGroupBox;
 };
 
 #endif // TRACKINGCONTROLWIDGET_H

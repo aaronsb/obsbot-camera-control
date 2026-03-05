@@ -23,9 +23,9 @@ TrackingControlWidget::TrackingControlWidget(CameraController *controller, QWidg
     layout->setContentsMargins(8, 14, 8, 14);
     layout->setSpacing(14);
 
-    QGroupBox *groupBox = new QGroupBox("Face Tracking", this);
-    groupBox->setFlat(true);
-    QVBoxLayout *groupLayout = new QVBoxLayout(groupBox);
+    m_trackingGroupBox = new QGroupBox("Face Tracking", this);
+    m_trackingGroupBox->setFlat(true);
+    QVBoxLayout *groupLayout = new QVBoxLayout(m_trackingGroupBox);
     groupLayout->setContentsMargins(16, 16, 16, 16);
     groupLayout->setSpacing(12);
 
@@ -103,7 +103,7 @@ TrackingControlWidget::TrackingControlWidget(CameraController *controller, QWidg
     groupLayout->addWidget(m_advancedContainer);
     updateTiny2Visibility();
 
-    layout->addWidget(groupBox);
+    layout->addWidget(m_trackingGroupBox);
 
     // Manual PTZ Controls (disabled when auto-framing is enabled)
     m_ptzContainer = new QWidget(this);
@@ -333,6 +333,17 @@ void TrackingControlWidget::updateFromState(const CameraController::CameraState 
         }
     }
 
+    // Sync zoom slider from camera state (only when user isn't dragging)
+    if (!m_zoomSlider->isSliderDown() && !commandInFlight && !isSettling) {
+        int zoomSliderVal = static_cast<int>(state.zoom * 10.0 + 0.5);
+        if (m_zoomSlider->value() != zoomSliderVal) {
+            m_zoomSlider->blockSignals(true);
+            m_zoomSlider->setValue(zoomSliderVal);
+            m_zoomSlider->blockSignals(false);
+            m_zoomLabel->setText(QString("%1x").arg(zoomSliderVal / 10.0, 0, 'f', 1));
+        }
+    }
+
     // Sync focus slider from camera state (only when user isn't dragging)
     if (!m_focusSlider->isSliderDown() && !commandInFlight && !isSettling) {
         if (m_focusSlider->value() != state.manualFocusValue) {
@@ -503,6 +514,11 @@ void TrackingControlWidget::onFocusChanged(int value)
     m_dirtyFocus = true;
     m_focusLabel->setText(QString::number(value));
     scheduleFlush();
+}
+
+void TrackingControlWidget::setV4l2Mode(bool v4l2Only)
+{
+    m_trackingGroupBox->setVisible(!v4l2Only);
 }
 
 void TrackingControlWidget::setMirrored(bool mirrored)

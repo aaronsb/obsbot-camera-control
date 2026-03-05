@@ -951,9 +951,15 @@ void MainWindow::onTogglePreview(bool enabled)
             return;
         }
 
-        // Try to enable preview - will emit previewStarted() or previewFailed()
         m_previewWidget->setCameraDeviceId(devicePath);
         m_previewWidget->enablePreview(true);
+
+        if (m_controller->isV4l2Only()) {
+            QTimer::singleShot(1500, this, [this]() {
+                auto state = m_controller->getCurrentState();
+                m_controller->setWhiteBalanceManual(state.whiteBalanceKelvin);
+            });
+        }
 
         if (!m_previewDetached) {
             if (m_previewStack->indexOf(m_previewWidget) == -1) {
@@ -1010,17 +1016,24 @@ void MainWindow::onPreviewWindowClosed()
 
 void MainWindow::onCameraConnected(const CameraController::CameraInfo &info)
 {
-    QString deviceText = QString("✓ Connected:\n%1\n(v%2)")
-        .arg(info.name)
-        .arg(info.version);
+    QString deviceText;
+    if (info.version.isEmpty()) {
+        deviceText = QString("✓ Connected:\n%1").arg(info.name);
+    } else {
+        deviceText = QString("✓ Connected:\n%1\n(v%2)")
+            .arg(info.name)
+            .arg(info.version);
+    }
 
     m_deviceInfoLabel->setText(deviceText);
     updateStatusBanner(true);
     m_cameraWarningLabel->setVisible(false);
     m_cameraWarningLabel->setText("");
 
-    // Apply current UI state to camera asynchronously (respects user changes before connection)
-    // Use a short delay to let the connection stabilize
+    bool v4l2Mode = m_controller->isV4l2Only();
+    m_trackingWidget->setV4l2Mode(v4l2Mode);
+    m_settingsWidget->setV4l2Mode(v4l2Mode);
+
     QTimer::singleShot(100, this, [this]() {
         auto uiState = getUIState();
         m_controller->applyCurrentStateToCamera(uiState);

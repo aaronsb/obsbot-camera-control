@@ -1063,6 +1063,13 @@ void MainWindow::onStateChanged(const CameraController::CameraState &state)
     // Update all widgets with new state
     m_trackingWidget->updateFromState(state);
     m_settingsWidget->updateFromState(state);
+
+    // Refit tab height — widget visibility may have changed (e.g. Tiny2 advanced controls)
+    QWidget *page = m_tabWidget->currentWidget();
+    if (page) {
+        m_tabWidget->setMaximumHeight(
+            page->sizeHint().height() + m_tabWidget->tabBar()->sizeHint().height());
+    }
 }
 
 void MainWindow::onCommandFailed(const QString &description, int errorCode)

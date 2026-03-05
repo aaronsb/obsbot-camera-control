@@ -43,6 +43,8 @@ add_executable(obsbot-gui
     src/gui/VirtualCameraStreamer.h
     src/gui/PreviewWindow.cpp
     src/gui/PreviewWindow.h
+    src/gui/V4l2Backend.cpp
+    src/gui/V4l2Backend.h
     src/gui/XYPad.cpp
     src/gui/XYPad.h
     src/common/Config.cpp

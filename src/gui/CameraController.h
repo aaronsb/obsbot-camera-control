@@ -3,6 +3,7 @@
 
 #include <QObject>
 #include <QTimer>
+#include <QMap>
 #include <memory>
 #include <functional>
 #include <vector>
@@ -80,8 +81,10 @@ public:
     bool isConnected() const { return m_connected; }
     CameraInfo getCameraInfo() const { return m_cameraInfo; }
     void connectToCamera();
+    void connectToCamera(const QString &devicePath);
     void disconnectFromCamera();
     QString getVideoDevicePath() const;
+    QMap<QString, QString> getSerialsByDevicePath() const;
 
     // State
     CameraState getCurrentState();
@@ -146,6 +149,7 @@ signals:
 private:
     std::shared_ptr<Device> m_device;
     bool m_connected;
+    QString m_selectedDevicePath;
     CameraInfo m_cameraInfo;
     CameraState m_currentState;
     CameraState m_cachedState;  // Cache intended state during settling

@@ -288,6 +288,10 @@ void TrackingControlWidget::updateFromState(const CameraController::CameraState 
         m_trackingCheckBox->blockSignals(false);
     }
 
+    if (!m_userInitiated && !commandInFlight && !isSettling) {
+        updatePTZControlsState();
+    }
+
     bool tiny2 = m_controller->hasTiny2Capabilities();
     if (tiny2 != m_tiny2Capabilities) {
         m_tiny2Capabilities = tiny2;
@@ -340,6 +344,17 @@ void TrackingControlWidget::updateFromState(const CameraController::CameraState 
             m_focusSlider->setValue(state.manualFocusValue);
             m_focusSlider->blockSignals(false);
             m_focusLabel->setText(QString::number(state.manualFocusValue));
+        }
+    }
+
+    // Sync zoom slider from camera state (only when user isn't dragging)
+    if (!m_zoomSlider->isSliderDown() && !commandInFlight && !isSettling) {
+        int zoomSliderVal = qRound(state.zoom * 100.0);
+        if (m_zoomSlider->value() != zoomSliderVal) {
+            m_zoomSlider->blockSignals(true);
+            m_zoomSlider->setValue(zoomSliderVal);
+            m_zoomSlider->blockSignals(false);
+            m_zoomLabel->setText(QString("%1x").arg(state.zoom, 0, 'f', 2));
         }
     }
 

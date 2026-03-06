@@ -40,6 +40,7 @@ public:
     ~MainWindow();
 
 private slots:
+    void onCameraSelectorChanged(int index);
     void onCameraConnected(const CameraController::CameraInfo &info);
     void onCameraDisconnected();
     void onStateChanged(const CameraController::CameraState &state);
@@ -84,6 +85,14 @@ private:
 
     // Controller
     CameraController *m_controller;
+
+    // Camera selector (shown only when >1 OBSBOT camera is detected)
+    QComboBox *m_cameraSelectorCombo {nullptr};
+    QLabel *m_cameraSelectorLabel {nullptr};
+    struct DetectedCamera { QString label; QString devicePath; QString serial; };
+    QList<DetectedCamera> m_detectedCameras;
+    void populateCameraSelector();
+    bool m_isCameraSwitch {false};
 
     // UI
     QPushButton *m_previewToggleButton;

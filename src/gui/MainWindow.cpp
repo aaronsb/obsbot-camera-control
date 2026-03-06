@@ -1071,6 +1071,7 @@ void MainWindow::onCameraConnected(const CameraController::CameraInfo &info)
 
 void MainWindow::onCameraDisconnected()
 {
+    m_isCameraSwitch = false;
     m_deviceInfoLabel->setText("❌ Camera Disconnected");
     updateStatusBanner(false);
     m_statusLabel->setText("Status: Not connected");
@@ -1103,6 +1104,9 @@ void MainWindow::onCommandFailed(const QString &description, int errorCode)
 
 void MainWindow::updateStatus()
 {
+    // Refresh camera selector in case devices were hot-plugged
+    populateCameraSelector();
+
     if (!m_controller->isConnected()) {
         return;
     }
@@ -1574,10 +1578,14 @@ void MainWindow::onCameraSelectorChanged(int index)
 
     m_previewWidget->setCameraDeviceId(cam.devicePath);
 
+    // Brief delay after disconnect so the SDK releases the previous device
+    // before we attempt to connect to the new one.
+    static constexpr int kCameraSwitchDelayMs = 300;
+
     const QString devicePath = cam.devicePath;
     m_isCameraSwitch = true;
     m_controller->disconnectFromCamera();
-    QTimer::singleShot(300, this, [this, devicePath]() {
+    QTimer::singleShot(kCameraSwitchDelayMs, this, [this, devicePath]() {
         m_controller->connectToCamera(devicePath);
     });
 }

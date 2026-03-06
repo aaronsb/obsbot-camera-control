@@ -297,8 +297,6 @@ bool CameraController::setZoom(double zoom)
         return m_device->cameraSetZoomWithSpeedAbsoluteR(zoomRatio, 255);
     });
 
-    qDebug() << "setZoom:" << zoom << "ratio:" << zoomRatio;
-
     if (success) {
         m_currentState.zoom = zoom;
         emit stateChanged(m_currentState);
@@ -531,6 +529,9 @@ void CameraController::updateState()
     // Derive zoom float from zoom_ratio (100 = 1.0x, 200 = 2.0x)
     if (status.tiny.zoom_ratio >= 100 && status.tiny.zoom_ratio <= 200) {
         m_currentState.zoom = status.tiny.zoom_ratio / 100.0;
+    } else {
+        qDebug() << "CameraController: unexpected zoom_ratio" << status.tiny.zoom_ratio
+                 << "— keeping previous zoom" << m_currentState.zoom;
     }
     m_currentState.hdrEnabled = status.tiny.hdr;
     m_currentState.faceAEEnabled = status.tiny.face_ae;

@@ -39,6 +39,8 @@ public:
     explicit MainWindow(QWidget *parent = nullptr);
     ~MainWindow();
 
+    bool isStartingMinimized() const;
+
 private slots:
     void onCameraSelectorChanged(int index);
     void onCameraConnected(const CameraController::CameraInfo &info);

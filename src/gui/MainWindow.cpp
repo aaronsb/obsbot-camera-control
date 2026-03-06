@@ -352,6 +352,29 @@ void MainWindow::setupUI()
 
     scrollLayout->addWidget(m_statusBanner);
 
+    // Camera selector (hidden when only one OBSBOT is present)
+    {
+        QWidget *selectorRow = new QWidget(scrollContent);
+        QHBoxLayout *selectorLayout = new QHBoxLayout(selectorRow);
+        selectorLayout->setContentsMargins(0, 0, 0, 0);
+        selectorLayout->setSpacing(8);
+
+        m_cameraSelectorLabel = new QLabel(tr("Camera"), selectorRow);
+        selectorLayout->addWidget(m_cameraSelectorLabel);
+
+        m_cameraSelectorCombo = new QComboBox(selectorRow);
+        m_cameraSelectorCombo->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+        m_cameraSelectorCombo->setToolTip(tr("Select which OBSBOT camera to control"));
+        selectorLayout->addWidget(m_cameraSelectorCombo, 1);
+
+        connect(m_cameraSelectorCombo,
+                QOverload<int>::of(&QComboBox::currentIndexChanged),
+                this, &MainWindow::onCameraSelectorChanged);
+
+        scrollLayout->addWidget(selectorRow);
+    }
+    populateCameraSelector();
+
     QWidget *actionRow = new QWidget(scrollContent);
     actionRow->setObjectName("actionRow");
     QHBoxLayout *actionLayout = new QHBoxLayout(actionRow);
@@ -1022,8 +1045,15 @@ void MainWindow::onCameraConnected(const CameraController::CameraInfo &info)
     // Apply current UI state to camera asynchronously (respects user changes before connection)
     // Use a short delay to let the connection stabilize
     QTimer::singleShot(100, this, [this]() {
-        auto uiState = getUIState();
-        m_controller->applyCurrentStateToCamera(uiState);
+        if (m_isCameraSwitch) {
+            // Pull the new camera's actual state into the UI
+            // without pushing the old camera's state back
+            auto state = m_controller->getCurrentState();
+            onStateChanged(state);
+            m_isCameraSwitch = false;
+        } else {
+            m_controller->applyCurrentStateToCamera(getUIState());
+        }
     });
 
     updateStatus();
@@ -1041,6 +1071,7 @@ void MainWindow::onCameraConnected(const CameraController::CameraInfo &info)
 
 void MainWindow::onCameraDisconnected()
 {
+    m_isCameraSwitch = false;
     m_deviceInfoLabel->setText("❌ Camera Disconnected");
     updateStatusBanner(false);
     m_statusLabel->setText("Status: Not connected");
@@ -1073,6 +1104,9 @@ void MainWindow::onCommandFailed(const QString &description, int errorCode)
 
 void MainWindow::updateStatus()
 {
+    // Refresh camera selector in case devices were hot-plugged
+    populateCameraSelector();
+
     if (!m_controller->isConnected()) {
         return;
     }
@@ -1431,7 +1465,12 @@ void MainWindow::onPreviewFailed(const QString &error)
     QString warningText = "⚠ Cannot open camera preview";
 
     // Try to detect which process is using the camera
-    QString process = getProcessUsingCamera("/dev/video0");
+    const QString failedDevice = m_detectedCameras.isEmpty()
+        ? QStringLiteral("/dev/video0")
+        : m_detectedCameras.value(
+              m_cameraSelectorCombo ? m_cameraSelectorCombo->currentIndex() : 0
+          ).devicePath;
+    QString process = getProcessUsingCamera(failedDevice);
     if (!process.isEmpty()) {
         warningText += "\n(In use by: " + process + ")";
     } else {
@@ -1476,6 +1515,79 @@ void MainWindow::onPresetUpdated(int index, double pan, double tilt, double zoom
 
     m_controller->getConfig().setSettings(settings);
     m_controller->saveConfig();
+}
+
+void MainWindow::populateCameraSelector()
+{
+    const QList<QCameraDevice> allCameras = QMediaDevices::videoInputs();
+
+    m_detectedCameras.clear();
+    for (const QCameraDevice &dev : allCameras) {
+        if (dev.description().contains("OBSBOT", Qt::CaseInsensitive) ||
+            dev.description().contains("Meet", Qt::CaseInsensitive)) {
+            const QString id = dev.id();
+            if (id.startsWith("/dev/video")) {
+                DetectedCamera cam;
+                cam.devicePath = id;
+                cam.label = dev.description() + "  (" + id + ")";
+                m_detectedCameras.append(cam);
+            }
+        }
+    }
+
+    // Enrich with serial numbers from the SDK device list
+    const auto sdkSerials = m_controller->getSerialsByDevicePath();
+    for (auto &cam : m_detectedCameras) {
+        const QString sn = sdkSerials.value(cam.devicePath);
+        if (!sn.isEmpty()) {
+            cam.serial = sn;
+            cam.label += "  [" + sn + "]";
+        }
+    }
+
+    if (!m_cameraSelectorCombo) return;
+
+    m_cameraSelectorCombo->blockSignals(true);
+    m_cameraSelectorCombo->clear();
+
+    if (m_detectedCameras.isEmpty()) {
+        m_cameraSelectorCombo->addItem(tr("No OBSBOT camera found"));
+        m_cameraSelectorCombo->setEnabled(false);
+    } else {
+        for (const auto &cam : std::as_const(m_detectedCameras))
+            m_cameraSelectorCombo->addItem(cam.label);
+        m_cameraSelectorCombo->setEnabled(true);
+    }
+    m_cameraSelectorCombo->blockSignals(false);
+
+    const bool multiCam = m_detectedCameras.size() > 1;
+    m_cameraSelectorCombo->setVisible(multiCam);
+    if (m_cameraSelectorLabel)
+        m_cameraSelectorLabel->setVisible(multiCam);
+}
+
+void MainWindow::onCameraSelectorChanged(int index)
+{
+    if (index < 0 || index >= m_detectedCameras.size()) return;
+
+    const DetectedCamera &cam = m_detectedCameras[index];
+
+    if (m_previewToggleButton->isChecked()) {
+        m_previewToggleButton->setChecked(false);
+    }
+
+    m_previewWidget->setCameraDeviceId(cam.devicePath);
+
+    // Brief delay after disconnect so the SDK releases the previous device
+    // before we attempt to connect to the new one.
+    static constexpr int kCameraSwitchDelayMs = 300;
+
+    const QString devicePath = cam.devicePath;
+    m_isCameraSwitch = true;
+    m_controller->disconnectFromCamera();
+    QTimer::singleShot(kCameraSwitchDelayMs, this, [this, devicePath]() {
+        m_controller->connectToCamera(devicePath);
+    });
 }
 
 QString MainWindow::findObsbotVideoDevice()

@@ -1,5 +1,6 @@
 #include "CameraController.h"
 #include <QThread>
+#include <QDebug>
 #include <algorithm>
 
 CameraController::CameraController(QObject *parent)
@@ -28,21 +29,40 @@ CameraController::~CameraController()
 
 void CameraController::connectToCamera()
 {
-    // Setup device detection callback
-    auto onDevChanged = [this](std::string dev_sn, bool connected, void *param) {
-        if (connected) {
-            // Device connected
-            auto dev_list = Devices::get().getDevList();
-            if (!dev_list.empty()) {
-                m_device = dev_list.front();
-                m_connected = true;
+    connectToCamera(QString());
+}
 
+void CameraController::connectToCamera(const QString &devicePath)
+{
+    m_selectedDevicePath = devicePath;
+
+    auto pickDevice = [this](const std::list<std::shared_ptr<Device>> &list)
+        -> std::shared_ptr<Device>
+    {
+        if (list.empty()) return nullptr;
+        if (m_selectedDevicePath.isEmpty()) return list.front();
+
+        for (const auto &dev : list) {
+            if (QString::fromStdString(dev->videoDevPath()) == m_selectedDevicePath)
+                return dev;
+        }
+        qDebug() << "CameraController: device" << m_selectedDevicePath
+                 << "not found in SDK list, using first available";
+        return list.front();
+    };
+
+    auto onDevChanged = [this, pickDevice](std::string /*dev_sn*/, bool connected, void * /*param*/) {
+        if (connected) {
+            auto dev_list = Devices::get().getDevList();
+            auto dev = pickDevice(dev_list);
+            if (dev) {
+                m_device = dev;
+                m_connected = true;
                 m_cameraInfo.name = QString::fromStdString(m_device->devName());
                 m_cameraInfo.serialNumber = QString::fromStdString(m_device->devSn());
                 m_cameraInfo.version = QString::fromStdString(m_device->devVersion());
                 m_cameraInfo.productType = m_device->productType();
                 m_cameraInfo.connected = true;
-
                 refreshControlRanges();
                 emit cameraConnected(m_cameraInfo);
                 updateState();
@@ -56,25 +76,23 @@ void CameraController::connectToCamera()
     };
 
     Devices::get().setDevChangedCallback(onDevChanged, nullptr);
-    Devices::get().setEnableMdnsScan(false);  // USB only
+    Devices::get().setEnableMdnsScan(false);
 
-    // Actively check for existing devices (handles reconnection scenario)
-    // The callback only fires on connect/disconnect events, so if the device
-    // is already connected (e.g., after window restore), we need to connect directly
     auto dev_list = Devices::get().getDevList();
     if (!dev_list.empty() && !m_connected) {
-        m_device = dev_list.front();
-        m_connected = true;
-
-        m_cameraInfo.name = QString::fromStdString(m_device->devName());
-        m_cameraInfo.serialNumber = QString::fromStdString(m_device->devSn());
-    m_cameraInfo.version = QString::fromStdString(m_device->devVersion());
-    m_cameraInfo.productType = m_device->productType();
-    m_cameraInfo.connected = true;
-
-    refreshControlRanges();
-    emit cameraConnected(m_cameraInfo);
-    updateState();
+        auto dev = pickDevice(dev_list);
+        if (dev) {
+            m_device = dev;
+            m_connected = true;
+            m_cameraInfo.name = QString::fromStdString(m_device->devName());
+            m_cameraInfo.serialNumber = QString::fromStdString(m_device->devSn());
+            m_cameraInfo.version = QString::fromStdString(m_device->devVersion());
+            m_cameraInfo.productType = m_device->productType();
+            m_cameraInfo.connected = true;
+            refreshControlRanges();
+            emit cameraConnected(m_cameraInfo);
+            updateState();
+        }
     }
 }
 
@@ -97,6 +115,19 @@ QString CameraController::getVideoDevicePath() const
         return QString::fromStdString(m_device->videoDevPath());
     }
     return QString();
+}
+
+QMap<QString, QString> CameraController::getSerialsByDevicePath() const
+{
+    QMap<QString, QString> result;
+    const auto dev_list = Devices::get().getDevList();
+    for (const auto &dev : dev_list) {
+        const QString path = QString::fromStdString(dev->videoDevPath());
+        const QString serial = QString::fromStdString(dev->devSn());
+        if (!path.isEmpty() && !serial.isEmpty())
+            result.insert(path, serial);
+    }
+    return result;
 }
 
 CameraController::CameraState CameraController::getCurrentState()
@@ -261,8 +292,9 @@ bool CameraController::setZoom(double zoom)
     // Clamp to valid range (1.0 - 2.0)
     zoom = qBound(1.0, zoom, 2.0);
 
-    bool success = executeCommand("Set Zoom", [this, zoom]() {
-        return m_device->cameraSetZoomAbsoluteR(zoom);
+    uint32_t zoomRatio = static_cast<uint32_t>(zoom * 100);
+    bool success = executeCommand("Set Zoom", [this, zoomRatio]() {
+        return m_device->cameraSetZoomWithSpeedAbsoluteR(zoomRatio, 255);
     });
 
     if (success) {
@@ -494,6 +526,13 @@ void CameraController::updateState()
     m_currentState.aiMode = status.tiny.ai_mode;
     m_currentState.aiSubMode = status.tiny.ai_sub_mode;
     m_currentState.zoomRatio = status.tiny.zoom_ratio;
+    // Derive zoom float from zoom_ratio (100 = 1.0x, 200 = 2.0x)
+    if (status.tiny.zoom_ratio >= 100 && status.tiny.zoom_ratio <= 200) {
+        m_currentState.zoom = status.tiny.zoom_ratio / 100.0;
+    } else {
+        qDebug() << "CameraController: unexpected zoom_ratio" << status.tiny.zoom_ratio
+                 << "— keeping previous zoom" << m_currentState.zoom;
+    }
     m_currentState.hdrEnabled = status.tiny.hdr;
     m_currentState.faceAEEnabled = status.tiny.face_ae;
     m_currentState.faceFocusEnabled = status.tiny.face_auto_focus;
@@ -658,7 +697,7 @@ void CameraController::saveCurrentStateToConfig()
     settings.fov = m_currentState.fovMode;
     settings.faceAE = m_currentState.faceAEEnabled;
     settings.faceFocus = m_currentState.faceFocusEnabled;
-    settings.zoom = m_currentState.zoom;
+    settings.zoom = qBound(1.0, m_currentState.zoom, 2.0);
     settings.pan = m_currentState.pan;
     settings.tilt = m_currentState.tilt;
     settings.aiMode = m_currentState.aiMode;

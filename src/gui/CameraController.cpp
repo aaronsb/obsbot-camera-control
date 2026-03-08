@@ -3,6 +3,8 @@
 #include <QDebug>
 #include <algorithm>
 
+static constexpr int kDefaultWhiteBalanceKelvin = 4800;
+
 CameraController::CameraController(QObject *parent)
     : QObject(parent)
     , m_connected(false)
@@ -93,14 +95,125 @@ void CameraController::connectToCamera(const QString &devicePath)
             emit cameraConnected(m_cameraInfo);
             updateState();
         }
+    } else {
+        tryV4l2Fallback();
     }
+}
+
+void CameraController::tryV4l2Fallback()
+{
+    auto path = V4l2Backend::findObsbotDevice();
+    if (!path.empty()) {
+        connectV4l2(path);
+        return;
+    }
+
+    if (!m_v4l2ScanTimer) {
+        m_v4l2ScanTimer = new QTimer(this);
+        m_v4l2ScanTimer->setSingleShot(false);
+        connect(m_v4l2ScanTimer, &QTimer::timeout, this, [this]() {
+            if (m_connected)
+                return;
+            auto path = V4l2Backend::findObsbotDevice();
+            if (!path.empty()) {
+                m_v4l2ScanTimer->stop();
+                connectV4l2(path);
+            }
+        });
+    }
+    m_v4l2ScanTimer->start(3000);
+}
+
+void CameraController::connectV4l2(const std::string &devicePath)
+{
+    if (!m_v4l2.open(devicePath))
+        return;
+
+    Devices::get().close();
+
+    m_connected = true;
+    m_v4l2Only = true;
+    m_v4l2DevicePath = QString::fromStdString(devicePath);
+
+    std::string card = m_v4l2.cardName();
+    auto colon = card.find(':');
+    if (colon != std::string::npos)
+        card = card.substr(0, colon);
+    if (card.empty())
+        card = "OBSBOT";
+    m_cameraInfo.name = QString::fromStdString(card) + QStringLiteral(" (V4L2)");
+    m_cameraInfo.serialNumber = QString();
+    m_cameraInfo.version = QString();
+    m_cameraInfo.productType = -1;
+    m_cameraInfo.connected = true;
+
+    refreshV4l2ControlRanges();
+
+    m_v4l2.setWhiteBalanceAuto(false);
+    m_v4l2.setWhiteBalanceTemperature(kDefaultWhiteBalanceKelvin);
+
+    emit cameraConnected(m_cameraInfo);
+    updateV4l2State();
+}
+
+void CameraController::refreshV4l2ControlRanges()
+{
+    auto convert = [](V4l2Backend::ControlRange r) -> ParamRange {
+        return {r.min, r.max, r.step, r.defaultValue, r.valid};
+    };
+
+    m_brightnessRange = convert(m_v4l2.getBrightnessRange());
+    m_contrastRange = convert(m_v4l2.getContrastRange());
+    m_saturationRange = convert(m_v4l2.getSaturationRange());
+    m_whiteBalanceKelvinRange = convert(m_v4l2.getWhiteBalanceTemperatureRange());
+
+    m_supportedWhiteBalanceTypes.clear();
+    m_supportedWhiteBalanceTypes.push_back(static_cast<int>(Device::DevWhiteBalanceAuto));
+    m_supportedWhiteBalanceTypes.push_back(static_cast<int>(Device::DevWhiteBalanceManual));
+}
+
+void CameraController::updateV4l2State()
+{
+    if (!m_v4l2.isOpen())
+        return;
+
+    m_currentState.brightness = m_v4l2.getBrightness();
+    m_currentState.contrast = m_v4l2.getContrast();
+    m_currentState.saturation = m_v4l2.getSaturation();
+
+    bool autoWb = m_v4l2.getWhiteBalanceAuto();
+    m_currentState.whiteBalance = autoWb
+        ? static_cast<int>(Device::DevWhiteBalanceAuto)
+        : static_cast<int>(Device::DevWhiteBalanceManual);
+    m_currentState.whiteBalanceKelvin = m_v4l2.getWhiteBalanceTemperature();
+
+    auto zoomRange = m_v4l2.getZoomRange();
+    int zoomMax = zoomRange.valid ? zoomRange.max : 100;
+    int zoomRaw = m_v4l2.getZoomAbsolute();
+    m_currentState.zoom = (zoomMax > 0) ? (static_cast<double>(zoomRaw) / zoomMax + 1.0) : 1.0;
+
+    auto panRange = m_v4l2.getPanRange();
+    auto tiltRange = m_v4l2.getTiltRange();
+    if (panRange.valid && panRange.max != 0)
+        m_currentState.pan = static_cast<double>(m_v4l2.getPanAbsolute()) / panRange.max;
+    if (tiltRange.valid && tiltRange.max != 0)
+        m_currentState.tilt = static_cast<double>(m_v4l2.getTiltAbsolute()) / tiltRange.max;
+
+    m_currentState.autoFocusEnabled = m_v4l2.getAutoFocus();
+    m_currentState.manualFocusValue = m_v4l2.getFocusAbsolute();
+
+    emit stateChanged(m_currentState);
 }
 
 void CameraController::disconnectFromCamera()
 {
     if (m_connected) {
-        // Release our device handle - this allows other apps to access the camera
-        m_device.reset();
+        if (m_v4l2Only) {
+            m_v4l2.close();
+            m_v4l2Only = false;
+        } else {
+            m_device.reset();
+        }
         m_connected = false;
         m_cameraInfo.connected = false;
         resetControlRanges();
@@ -111,9 +224,10 @@ void CameraController::disconnectFromCamera()
 
 QString CameraController::getVideoDevicePath() const
 {
-    if (m_connected && m_device) {
+    if (m_v4l2Only)
+        return m_v4l2DevicePath;
+    if (m_connected && m_device)
         return QString::fromStdString(m_device->videoDevPath());
-    }
     return QString();
 }
 
@@ -133,9 +247,11 @@ QMap<QString, QString> CameraController::getSerialsByDevicePath() const
 CameraController::CameraState CameraController::getCurrentState()
 {
     if (m_connected && !isSettling()) {
-        updateState();
+        if (m_v4l2Only)
+            updateV4l2State();
+        else
+            updateState();
     }
-    // Return cached state during settling, actual state otherwise
     return isSettling() ? m_cachedState : m_currentState;
 }
 
@@ -146,7 +262,7 @@ bool CameraController::hasTiny2Capabilities() const
 
 bool CameraController::enableAutoFraming(bool enabled)
 {
-    if (!m_connected) return false;
+    if (!m_connected || m_v4l2Only) return false;
 
     if (enabled) {
         // Step 1: Set MediaMode to AutoFrame
@@ -186,7 +302,7 @@ bool CameraController::enableAutoFraming(bool enabled)
 
 bool CameraController::setAiMode(int mode, int subMode)
 {
-    if (!m_connected) return false;
+    if (!m_connected || m_v4l2Only) return false;
 
     auto workMode = static_cast<Device::AiWorkModeType>(mode);
     bool success = executeCommand("Set AI Mode", [this, workMode, subMode]() {
@@ -205,7 +321,7 @@ bool CameraController::setAiMode(int mode, int subMode)
 
 bool CameraController::setAutoZoom(bool enabled)
 {
-    if (!m_connected) return false;
+    if (!m_connected || m_v4l2Only) return false;
 
     bool success = executeCommand(enabled ? "Enable Auto Zoom" : "Disable Auto Zoom", [this, enabled]() {
         return m_device->aiSetAiAutoZoomR(enabled);
@@ -221,7 +337,7 @@ bool CameraController::setAutoZoom(bool enabled)
 
 bool CameraController::setTrackSpeed(int speedMode)
 {
-    if (!m_connected) return false;
+    if (!m_connected || m_v4l2Only) return false;
 
     auto speed = static_cast<Device::AiTrackSpeedType>(speedMode);
     bool success = executeCommand("Set Tracking Speed", [this, speed]() {
@@ -238,7 +354,7 @@ bool CameraController::setTrackSpeed(int speedMode)
 
 bool CameraController::setAudioAutoGain(bool enabled)
 {
-    if (!m_connected) return false;
+    if (!m_connected || m_v4l2Only) return false;
 
     bool success = executeCommand(enabled ? "Enable Audio Auto Gain" : "Disable Audio Auto Gain", [this, enabled]() {
         return m_device->cameraSetAudioAutoGainU(enabled);
@@ -256,13 +372,21 @@ bool CameraController::setPanTilt(double pan, double tilt)
 {
     if (!m_connected) return false;
 
-    // Clamp values
     pan = qBound(-1.0, pan, 1.0);
     tilt = qBound(-1.0, tilt, 1.0);
 
-    bool success = executeCommand("Set Pan/Tilt", [this, pan, tilt]() {
-        return m_device->cameraSetPanTiltAbsolute(pan, tilt);
-    });
+    bool success;
+    if (m_v4l2Only) {
+        auto panRange = m_v4l2.getPanRange();
+        auto tiltRange = m_v4l2.getTiltRange();
+        int panVal = static_cast<int>(pan * panRange.max);
+        int tiltVal = static_cast<int>(tilt * tiltRange.max);
+        success = m_v4l2.setPanAbsolute(panVal) && m_v4l2.setTiltAbsolute(tiltVal);
+    } else {
+        success = executeCommand("Set Pan/Tilt", [this, pan, tilt]() {
+            return m_device->cameraSetPanTiltAbsolute(pan, tilt);
+        });
+    }
 
     if (success) {
         m_currentState.pan = pan;
@@ -289,13 +413,20 @@ bool CameraController::setZoom(double zoom)
 {
     if (!m_connected) return false;
 
-    // Clamp to valid range (1.0 - 2.0)
     zoom = qBound(1.0, zoom, 2.0);
 
-    uint32_t zoomRatio = static_cast<uint32_t>(zoom * 100);
-    bool success = executeCommand("Set Zoom", [this, zoomRatio]() {
-        return m_device->cameraSetZoomWithSpeedAbsoluteR(zoomRatio, 255);
-    });
+    bool success;
+    if (m_v4l2Only) {
+        auto zoomRange = m_v4l2.getZoomRange();
+        int zoomMax = zoomRange.valid ? zoomRange.max : 100;
+        int v4l2Zoom = static_cast<int>((zoom - 1.0) * zoomMax);
+        success = m_v4l2.setZoomAbsolute(v4l2Zoom);
+    } else {
+        uint32_t zoomRatio = static_cast<uint32_t>(zoom * 100);
+        success = executeCommand("Set Zoom", [this, zoomRatio]() {
+            return m_device->cameraSetZoomWithSpeedAbsoluteR(zoomRatio, 255);
+        });
+    }
 
     if (success) {
         m_currentState.zoom = zoom;
@@ -312,7 +443,7 @@ bool CameraController::centerView()
 
 bool CameraController::setHDR(bool enabled)
 {
-    if (!m_connected) return false;
+    if (!m_connected || m_v4l2Only) return false;
 
     return executeCommand(enabled ? "Enable HDR" : "Disable HDR", [this, enabled]() {
         return m_device->cameraSetWdrR(enabled ? Device::DevWdrModeDol2TO1 : Device::DevWdrModeNone);
@@ -321,7 +452,7 @@ bool CameraController::setHDR(bool enabled)
 
 bool CameraController::setFOV(int fovMode)
 {
-    if (!m_connected) return false;
+    if (!m_connected || m_v4l2Only) return false;
 
     Device::FovType fov;
     switch (fovMode) {
@@ -338,7 +469,7 @@ bool CameraController::setFOV(int fovMode)
 
 bool CameraController::setFaceAE(bool enabled)
 {
-    if (!m_connected) return false;
+    if (!m_connected || m_v4l2Only) return false;
 
     return executeCommand(enabled ? "Enable Face AE" : "Disable Face AE", [this, enabled]() {
         return m_device->cameraSetFaceAER(enabled);
@@ -347,7 +478,7 @@ bool CameraController::setFaceAE(bool enabled)
 
 bool CameraController::setFaceFocus(bool enabled)
 {
-    if (!m_connected) return false;
+    if (!m_connected || m_v4l2Only) return false;
 
     return executeCommand(enabled ? "Enable Face Focus" : "Disable Face Focus", [this, enabled]() {
         return m_device->cameraSetFaceFocusR(enabled);
@@ -358,9 +489,16 @@ bool CameraController::setFocusAbsolute(int position, bool autoFocus)
 {
     if (!m_connected) return false;
     position = qBound(0, position, 100);
-    bool success = executeCommand("Set Focus", [this, position, autoFocus]() {
-        return m_device->cameraSetFocusAbsolute(position, autoFocus);
-    });
+
+    bool success;
+    if (m_v4l2Only) {
+        m_v4l2.setAutoFocus(autoFocus);
+        success = autoFocus || m_v4l2.setFocusAbsolute(position);
+    } else {
+        success = executeCommand("Set Focus", [this, position, autoFocus]() {
+            return m_device->cameraSetFocusAbsolute(position, autoFocus);
+        });
+    }
     if (success) {
         m_currentState.autoFocusEnabled = autoFocus;
         m_currentState.manualFocusValue = position;
@@ -372,16 +510,17 @@ bool CameraController::setFocusAbsolute(int position, bool autoFocus)
 bool CameraController::setBrightness(int value)
 {
     if (!m_connected) return false;
-
-    // Don't send command if in auto mode
-    if (m_currentState.brightnessAuto) {
-        return true;
-    }
+    if (m_currentState.brightnessAuto) return true;
 
     int clamped = clampToRange(value, m_brightnessRange, 0, 255);
-    bool success = executeCommand("Set Brightness", [this, clamped]() {
-        return m_device->cameraSetImageBrightnessR(clamped);
-    });
+    bool success;
+    if (m_v4l2Only) {
+        success = m_v4l2.setBrightness(clamped);
+    } else {
+        success = executeCommand("Set Brightness", [this, clamped]() {
+            return m_device->cameraSetImageBrightnessR(clamped);
+        });
+    }
     if (success) {
         m_currentState.brightness = clamped;
         emit stateChanged(m_currentState);
@@ -392,16 +531,17 @@ bool CameraController::setBrightness(int value)
 bool CameraController::setContrast(int value)
 {
     if (!m_connected) return false;
-
-    // Don't send command if in auto mode
-    if (m_currentState.contrastAuto) {
-        return true;
-    }
+    if (m_currentState.contrastAuto) return true;
 
     int clamped = clampToRange(value, m_contrastRange, 0, 255);
-    bool success = executeCommand("Set Contrast", [this, clamped]() {
-        return m_device->cameraSetImageContrastR(clamped);
-    });
+    bool success;
+    if (m_v4l2Only) {
+        success = m_v4l2.setContrast(clamped);
+    } else {
+        success = executeCommand("Set Contrast", [this, clamped]() {
+            return m_device->cameraSetImageContrastR(clamped);
+        });
+    }
     if (success) {
         m_currentState.contrast = clamped;
         emit stateChanged(m_currentState);
@@ -412,16 +552,17 @@ bool CameraController::setContrast(int value)
 bool CameraController::setSaturation(int value)
 {
     if (!m_connected) return false;
-
-    // Don't send command if in auto mode
-    if (m_currentState.saturationAuto) {
-        return true;
-    }
+    if (m_currentState.saturationAuto) return true;
 
     int clamped = clampToRange(value, m_saturationRange, 0, 255);
-    bool success = executeCommand("Set Saturation", [this, clamped]() {
-        return m_device->cameraSetImageSaturationR(clamped);
-    });
+    bool success;
+    if (m_v4l2Only) {
+        success = m_v4l2.setSaturation(clamped);
+    } else {
+        success = executeCommand("Set Saturation", [this, clamped]() {
+            return m_device->cameraSetImageSaturationR(clamped);
+        });
+    }
     if (success) {
         m_currentState.saturation = clamped;
         emit stateChanged(m_currentState);
@@ -432,6 +573,32 @@ bool CameraController::setSaturation(int value)
 bool CameraController::setWhiteBalance(int mode)
 {
     if (!m_connected) return false;
+
+    if (m_v4l2Only) {
+        if (mode == static_cast<int>(Device::DevWhiteBalanceAuto)) {
+            m_v4l2.setWhiteBalanceAuto(true);
+            m_currentState.whiteBalance = mode;
+            emit stateChanged(m_currentState);
+            return true;
+        }
+        if (mode == static_cast<int>(Device::DevWhiteBalanceManual)) {
+            m_v4l2.setWhiteBalanceAuto(false);
+            m_v4l2.setWhiteBalanceTemperature(m_currentState.whiteBalanceKelvin);
+            m_currentState.whiteBalance = mode;
+            emit stateChanged(m_currentState);
+            return true;
+        }
+        int kelvin = whiteBalancePresetToKelvin(mode);
+        if (kelvin > 0) {
+            m_v4l2.setWhiteBalanceAuto(false);
+            m_v4l2.setWhiteBalanceTemperature(kelvin);
+            m_currentState.whiteBalance = mode;
+            m_currentState.whiteBalanceKelvin = kelvin;
+            emit stateChanged(m_currentState);
+            return true;
+        }
+        return false;
+    }
 
     m_lastRequestedWhiteBalance = mode;
 
@@ -495,6 +662,18 @@ bool CameraController::setWhiteBalance(int mode)
 bool CameraController::setWhiteBalanceManual(int kelvin)
 {
     if (!m_connected) return false;
+
+    if (m_v4l2Only) {
+        int clamped = clampToRange(kelvin, m_whiteBalanceKelvinRange, 2000, 10000);
+        m_v4l2.setWhiteBalanceAuto(false);
+        bool success = m_v4l2.setWhiteBalanceTemperature(clamped);
+        if (success) {
+            m_currentState.whiteBalance = static_cast<int>(Device::DevWhiteBalanceManual);
+            m_currentState.whiteBalanceKelvin = clamped;
+            emit stateChanged(m_currentState);
+        }
+        return success;
+    }
 
     m_lastRequestedWhiteBalance = static_cast<int>(Device::DevWhiteBalanceManual);
     m_whiteBalanceFallbackActive = false;
@@ -624,6 +803,11 @@ void CameraController::applyConfigToCamera()
     setFaceFocus(settings.faceFocus);
     setZoom(settings.zoom);
     setPanTilt(settings.pan, settings.tilt);
+    if (settings.focus >= 0) {
+        setFocusAbsolute(settings.focus, false);
+    } else {
+        setFocusAbsolute(0, true);
+    }
 
     if (isTiny2Family()) {
         setAiMode(settings.aiMode, settings.aiSubMode);
@@ -715,6 +899,7 @@ void CameraController::saveCurrentStateToConfig()
     settings.saturation = m_currentState.saturation;
     settings.whiteBalance = m_currentState.whiteBalance;
     settings.whiteBalanceKelvin = m_currentState.whiteBalanceKelvin;
+    settings.focus = m_currentState.autoFocusEnabled ? -1 : m_currentState.manualFocusValue;
 
     m_config.setSettings(settings);
 }

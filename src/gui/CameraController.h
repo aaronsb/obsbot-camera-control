@@ -9,6 +9,7 @@
 #include <vector>
 #include <dev/devs.hpp>
 #include "Config.h"
+#include "V4l2Backend.h"
 
 /**
  * @brief Handles all camera communication and state management
@@ -79,6 +80,7 @@ public:
 
     // Connection
     bool isConnected() const { return m_connected; }
+    bool isV4l2Only() const { return m_v4l2Only; }
     CameraInfo getCameraInfo() const { return m_cameraInfo; }
     void connectToCamera();
     void connectToCamera(const QString &devicePath);
@@ -150,6 +152,10 @@ private:
     std::shared_ptr<Device> m_device;
     bool m_connected;
     QString m_selectedDevicePath;
+    bool m_v4l2Only = false;
+    V4l2Backend m_v4l2;
+    QTimer *m_v4l2ScanTimer = nullptr;
+    QString m_v4l2DevicePath;
     CameraInfo m_cameraInfo;
     CameraState m_currentState;
     CameraState m_cachedState;  // Cache intended state during settling
@@ -164,6 +170,10 @@ private:
     bool m_whiteBalanceFallbackActive;
     int m_fallbackWhiteBalanceMode;
     bool isTiny2Family() const;
+    void tryV4l2Fallback();
+    void connectV4l2(const std::string &devicePath);
+    void refreshV4l2ControlRanges();
+    void updateV4l2State();
 
     // Helper
     bool executeCommand(const QString &description, std::function<int32_t()> command);

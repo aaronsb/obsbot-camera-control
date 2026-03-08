@@ -44,6 +44,7 @@ void Config::setDefaults()
     m_settings.saturation = 128;
     m_settings.whiteBalance = 0;      // Auto
     m_settings.whiteBalanceKelvin = 5000;
+    m_settings.focus = -1;            // Auto focus
 
     // Audio defaults
     m_settings.audioAutoGain = true;
@@ -188,6 +189,7 @@ bool Config::load(std::vector<ValidationError> &errors)
         "virtual_camera_device",
         "virtual_camera_resolution",
         "white_balance_kelvin",
+        "focus",
         "snapshot_directory"
     };
 
@@ -351,11 +353,14 @@ bool Config::parseLine(const std::string &line, int lineNumber, std::vector<Vali
     } else if (key == "zoom") {
         try {
             double zoom = std::stod(value);
-            if (zoom < 1.0 || zoom > 2.0) {
+            if (zoom == 0.0) {
+                m_settings.zoom = 0.0;
+            } else if (zoom < 1.0 || zoom > 2.0) {
                 addError(InvalidValue, "zoom must be between 1.0 and 2.0");
                 return false;
+            } else {
+                m_settings.zoom = zoom;
             }
-            m_settings.zoom = zoom;
         } catch (...) {
             addError(InvalidValue, "zoom must be a number between 1.0 and 2.0");
             return false;
@@ -433,11 +438,14 @@ bool Config::parseLine(const std::string &line, int lineNumber, std::vector<Vali
     } else if (key == "brightness") {
         try {
             int brightness = std::stoi(value);
-            if (brightness < 0 || brightness > 255) {
+            if (brightness == -1) {
+                m_settings.brightness = -1;
+            } else if (brightness < 0 || brightness > 255) {
                 addError(InvalidValue, "brightness must be between 0 and 255");
                 return false;
+            } else {
+                m_settings.brightness = brightness;
             }
-            m_settings.brightness = brightness;
         } catch (...) {
             addError(InvalidValue, "brightness must be an integer between 0 and 255");
             return false;
@@ -450,11 +458,14 @@ bool Config::parseLine(const std::string &line, int lineNumber, std::vector<Vali
     } else if (key == "contrast") {
         try {
             int contrast = std::stoi(value);
-            if (contrast < 0 || contrast > 255) {
+            if (contrast == -1) {
+                m_settings.contrast = -1;
+            } else if (contrast < 0 || contrast > 255) {
                 addError(InvalidValue, "contrast must be between 0 and 255");
                 return false;
+            } else {
+                m_settings.contrast = contrast;
             }
-            m_settings.contrast = contrast;
         } catch (...) {
             addError(InvalidValue, "contrast must be an integer between 0 and 255");
             return false;
@@ -467,11 +478,14 @@ bool Config::parseLine(const std::string &line, int lineNumber, std::vector<Vali
     } else if (key == "saturation") {
         try {
             int saturation = std::stoi(value);
-            if (saturation < 0 || saturation > 255) {
+            if (saturation == -1) {
+                m_settings.saturation = -1;
+            } else if (saturation < 0 || saturation > 255) {
                 addError(InvalidValue, "saturation must be between 0 and 255");
                 return false;
+            } else {
+                m_settings.saturation = saturation;
             }
-            m_settings.saturation = saturation;
         } catch (...) {
             addError(InvalidValue, "saturation must be an integer between 0 and 255");
             return false;
@@ -502,13 +516,31 @@ bool Config::parseLine(const std::string &line, int lineNumber, std::vector<Vali
     } else if (key == "white_balance_kelvin") {
         try {
             int kelvin = std::stoi(value);
-            if (kelvin < 2000 || kelvin > 10000) {
+            if (kelvin == -1) {
+                m_settings.whiteBalanceKelvin = -1;
+            } else if (kelvin < 2000 || kelvin > 10000) {
                 addError(InvalidValue, "white_balance_kelvin must be between 2000 and 10000");
                 return false;
+            } else {
+                m_settings.whiteBalanceKelvin = kelvin;
             }
-            m_settings.whiteBalanceKelvin = kelvin;
         } catch (...) {
             addError(InvalidValue, "white_balance_kelvin must be an integer between 2000 and 10000");
+            return false;
+        }
+    } else if (key == "focus") {
+        try {
+            int focus = std::stoi(value);
+            if (focus == -1) {
+                m_settings.focus = -1;
+            } else if (focus < 0 || focus > 100) {
+                addError(InvalidValue, "focus must be between 0 and 100");
+                return false;
+            } else {
+                m_settings.focus = focus;
+            }
+        } catch (...) {
+            addError(InvalidValue, "focus must be an integer between 0 and 100");
             return false;
         }
     } else if (key == "audio_auto_gain") {
@@ -589,7 +621,7 @@ bool Config::validateSettings(std::vector<ValidationError> &errors)
         addError("fov out of range (must be 0-2)");
     }
 
-    if (m_settings.zoom < 1.0 || m_settings.zoom > 2.0) {
+    if (m_settings.zoom != 0.0 && (m_settings.zoom < 1.0 || m_settings.zoom > 2.0)) {
         addError("zoom out of range (must be 1.0-2.0)");
     }
 
@@ -614,7 +646,7 @@ bool Config::validateSettings(std::vector<ValidationError> &errors)
     }
 
     if (m_settings.whiteBalance == 255) {
-        if (m_settings.whiteBalanceKelvin < 2000 || m_settings.whiteBalanceKelvin > 10000) {
+        if (m_settings.whiteBalanceKelvin != -1 && (m_settings.whiteBalanceKelvin < 2000 || m_settings.whiteBalanceKelvin > 10000)) {
             addError("white_balance_kelvin out of range (must be 2000-10000)");
         }
     }
@@ -768,6 +800,9 @@ bool Config::save()
     file << "white_balance=" << wbStr << "\n";
     file << "# Manual white balance temperature (Kelvin, only used when white_balance=manual)\n";
     file << "white_balance_kelvin=" << m_settings.whiteBalanceKelvin << "\n\n";
+
+    file << "# Manual focus position (0-100, -1 = auto)\n";
+    file << "focus=" << m_settings.focus << "\n\n";
 
     for (size_t i = 0; i < m_settings.presets.size(); ++i) {
         const auto &preset = m_settings.presets[i];

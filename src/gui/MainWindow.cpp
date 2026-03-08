@@ -431,16 +431,10 @@ void MainWindow::setupUI()
     m_effectsWidget->reset();
 
     // Resize tab widget to fit the current tab (QTabWidget normally sizes to the tallest)
-    auto fitTabToCurrentPage = [this]() {
-        QWidget *page = m_tabWidget->currentWidget();
-        if (!page) return;
-        m_tabWidget->setMaximumHeight(
-            page->sizeHint().height() + m_tabWidget->tabBar()->sizeHint().height());
-    };
-    connect(m_tabWidget, &QTabWidget::currentChanged, this, [fitTabToCurrentPage](int) {
+    connect(m_tabWidget, &QTabWidget::currentChanged, this, [this](int) {
         fitTabToCurrentPage();
     });
-    QTimer::singleShot(0, this, fitTabToCurrentPage);
+    QTimer::singleShot(0, this, &MainWindow::fitTabToCurrentPage);
 
     QGroupBox *virtualCameraGroup = new QGroupBox(tr("Virtual Camera"), scrollContent);
     QVBoxLayout *virtualLayout = new QVBoxLayout(virtualCameraGroup);
@@ -979,9 +973,15 @@ void MainWindow::onTogglePreview(bool enabled)
             return;
         }
 
-        // Try to enable preview - will emit previewStarted() or previewFailed()
         m_previewWidget->setCameraDeviceId(devicePath);
         m_previewWidget->enablePreview(true);
+
+        if (m_controller->isV4l2Only()) {
+            QTimer::singleShot(1500, this, [this]() {
+                auto state = m_controller->getCurrentState();
+                m_controller->setWhiteBalanceManual(state.whiteBalanceKelvin);
+            });
+        }
 
         if (!m_previewDetached) {
             if (m_previewStack->indexOf(m_previewWidget) == -1) {
@@ -1038,17 +1038,24 @@ void MainWindow::onPreviewWindowClosed()
 
 void MainWindow::onCameraConnected(const CameraController::CameraInfo &info)
 {
-    QString deviceText = QString("✓ Connected:\n%1\n(v%2)")
-        .arg(info.name)
-        .arg(info.version);
+    QString deviceText;
+    if (info.version.isEmpty()) {
+        deviceText = QString("✓ Connected:\n%1").arg(info.name);
+    } else {
+        deviceText = QString("✓ Connected:\n%1\n(v%2)")
+            .arg(info.name)
+            .arg(info.version);
+    }
 
     m_deviceInfoLabel->setText(deviceText);
     updateStatusBanner(true);
     m_cameraWarningLabel->setVisible(false);
     m_cameraWarningLabel->setText("");
 
-    // Apply current UI state to camera asynchronously (respects user changes before connection)
-    // Use a short delay to let the connection stabilize
+    bool v4l2Mode = m_controller->isV4l2Only();
+    m_trackingWidget->setV4l2Mode(v4l2Mode);
+    m_settingsWidget->setV4l2Mode(v4l2Mode);
+
     QTimer::singleShot(100, this, [this]() {
         if (m_isCameraSwitch) {
             // Pull the new camera's actual state into the UI
@@ -1099,6 +1106,17 @@ void MainWindow::onStateChanged(const CameraController::CameraState &state)
     // Update all widgets with new state
     m_trackingWidget->updateFromState(state);
     m_settingsWidget->updateFromState(state);
+
+    // Refit tab height — widget visibility may have changed (e.g. Tiny2 advanced controls)
+    fitTabToCurrentPage();
+}
+
+void MainWindow::fitTabToCurrentPage()
+{
+    QWidget *page = m_tabWidget->currentWidget();
+    if (!page) return;
+    m_tabWidget->setMaximumHeight(
+        page->sizeHint().height() + m_tabWidget->tabBar()->sizeHint().height());
 }
 
 void MainWindow::onCommandFailed(const QString &description, int errorCode)

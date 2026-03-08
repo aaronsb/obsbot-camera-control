@@ -431,16 +431,10 @@ void MainWindow::setupUI()
     m_effectsWidget->reset();
 
     // Resize tab widget to fit the current tab (QTabWidget normally sizes to the tallest)
-    auto fitTabToCurrentPage = [this]() {
-        QWidget *page = m_tabWidget->currentWidget();
-        if (!page) return;
-        m_tabWidget->setMaximumHeight(
-            page->sizeHint().height() + m_tabWidget->tabBar()->sizeHint().height());
-    };
-    connect(m_tabWidget, &QTabWidget::currentChanged, this, [fitTabToCurrentPage](int) {
+    connect(m_tabWidget, &QTabWidget::currentChanged, this, [this](int) {
         fitTabToCurrentPage();
     });
-    QTimer::singleShot(0, this, fitTabToCurrentPage);
+    QTimer::singleShot(0, this, &MainWindow::fitTabToCurrentPage);
 
     QGroupBox *virtualCameraGroup = new QGroupBox(tr("Virtual Camera"), scrollContent);
     QVBoxLayout *virtualLayout = new QVBoxLayout(virtualCameraGroup);
@@ -1112,6 +1106,17 @@ void MainWindow::onStateChanged(const CameraController::CameraState &state)
     // Update all widgets with new state
     m_trackingWidget->updateFromState(state);
     m_settingsWidget->updateFromState(state);
+
+    // Refit tab height — widget visibility may have changed (e.g. Tiny2 advanced controls)
+    fitTabToCurrentPage();
+}
+
+void MainWindow::fitTabToCurrentPage()
+{
+    QWidget *page = m_tabWidget->currentWidget();
+    if (!page) return;
+    m_tabWidget->setMaximumHeight(
+        page->sizeHint().height() + m_tabWidget->tabBar()->sizeHint().height());
 }
 
 void MainWindow::onCommandFailed(const QString &description, int errorCode)

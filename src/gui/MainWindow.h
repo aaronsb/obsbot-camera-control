@@ -84,6 +84,7 @@ private:
     QString currentVirtualCameraDevicePath() const;
     void updateVirtualCameraAvailability(const QString &devicePath);
     void updateVirtualCameraStreamerState();
+    void fitTabToCurrentPage();
 
     // Controller
     CameraController *m_controller;

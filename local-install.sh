@@ -63,7 +63,7 @@ fi
 if [ -d "$PROJECT_DIR" ]; then
     print_msg "$YELLOW" "⚠️  Directory already exists: $PROJECT_DIR"
     echo ""
-    read -p "Update existing installation? [Y/n] " -n 1 -r
+    read -p "Update existing installation? [Y/n] " -n 1 -r </dev/tty
     echo ""
 
     if [[ $REPLY =~ ^[Nn]$ ]]; then
@@ -104,7 +104,7 @@ echo ""
 CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
 print_msg "$BLUE" "Current branch: $CURRENT_BRANCH"
 echo ""
-read -p "Switch to a different branch? [y/N] " -n 1 -r
+read -p "Switch to a different branch? [y/N] " -n 1 -r </dev/tty
 echo ""
 
 if [[ $REPLY =~ ^[Yy]$ ]]; then
@@ -142,7 +142,7 @@ if [[ $REPLY =~ ^[Yy]$ ]]; then
     done
 
     echo ""
-    read -p "Enter branch number (or 'c' to cancel): " branch_choice
+    read -p "Enter branch number (or 'c' to cancel): " branch_choice </dev/tty
 
     if [[ $branch_choice =~ ^[0-9]+$ ]]; then
         if [ "$branch_choice" -le "$local_count" ]; then

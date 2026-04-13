@@ -308,17 +308,8 @@ void runInteractiveMode(shared_ptr<Device> dev)
         if (cmd == "q") break;
 
         char firstChar = cmd[0];
-        int choice = atoi(cmd.c_str());
+        int choice = (firstChar >= '0' && firstChar <= '9') ? (firstChar - '0') : firstChar;
         int32_t ret;
-
-        // Handle both numeric commands (0-9) and letter commands (a,m,k,j)
-        if (firstChar >= '1' && firstChar <= '9') {
-            choice = firstChar - '0';
-        } else if (firstChar == '0') {
-            choice = 0;
-        } else {
-            choice = firstChar;
-        }
 
         switch (choice) {
             case 1:

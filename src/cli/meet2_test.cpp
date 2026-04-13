@@ -268,6 +268,7 @@ void applyConfigToCamera(shared_ptr<Device> dev, const Config::CameraSettings &s
 void runInteractiveMode(shared_ptr<Device> dev)
 {
     cout << "\n=== Interactive Camera Control Menu ===" << endl;
+    cout << "\n--- PTZ Control ---" << endl;
     cout << "1. Enable Face Tracking" << endl;
     cout << "2. Disable Face Tracking" << endl;
     cout << "3. Zoom In" << endl;
@@ -277,6 +278,18 @@ void runInteractiveMode(shared_ptr<Device> dev)
     cout << "7. Tilt Up" << endl;
     cout << "8. Tilt Down" << endl;
     cout << "9. Center View" << endl;
+    cout << "\n--- Focus Control ---" << endl;
+    cout << "a. Enable Auto Focus" << endl;
+    cout << "m. Set Manual Focus (0-100)" << endl;
+    cout << "k. Focus Increase (Manual Mode)" << endl;
+    cout << "j. Focus Decrease (Manual Mode)" << endl;
+    cout << "\n--- HDR Control ---" << endl;
+    cout << "h. Enable HDR" << endl;
+    cout << "H. Disable HDR" << endl;
+    cout << "\n--- AI Mode Control ---" << endl;
+    cout << "i. Enable AI Mode (select mode)" << endl;
+    cout << "I. Disable AI Mode" << endl;
+    cout << "\n--- Other ---" << endl;
     cout << "0. Get Camera Status" << endl;
     cout << "q. Quit" << endl;
 
@@ -284,16 +297,28 @@ void runInteractiveMode(shared_ptr<Device> dev)
     double current_pan = 0.0;
     double current_tilt = 0.0;
     double current_zoom = 1.0;
+    int current_focus = 50;  // Default to middle position
     const double ptz_step = 0.1;
     const double zoom_step = 0.1;
+    const int focus_step = 5;  // 5% increments
 
     string cmd;
     cout << "\nEnter command: ";
     while (cin >> cmd) {
         if (cmd == "q") break;
 
+        char firstChar = cmd[0];
         int choice = atoi(cmd.c_str());
         int32_t ret;
+
+        // Handle both numeric commands (0-9) and letter commands (a,m,k,j)
+        if (firstChar >= '1' && firstChar <= '9') {
+            choice = firstChar - '0';
+        } else if (firstChar == '0') {
+            choice = 0;
+        } else {
+            choice = firstChar;
+        }
 
         switch (choice) {
             case 1:
@@ -378,6 +403,86 @@ void runInteractiveMode(shared_ptr<Device> dev)
                 cout << "  HDR: " << (status.tiny.hdr ? "On" : "Off") << endl;
                 cout << "  Face AE: " << (status.tiny.face_ae ? "On" : "Off") << endl;
                 cout << "  Auto Focus: " << (status.tiny.auto_focus ? "On" : "Off") << endl;
+                break;
+            }
+
+            case 'a': {
+                cout << "Enabling auto focus..." << endl;
+                int32_t ret = dev->cameraSetFocusAbsolute(0, true);
+                cout << (ret == 0 ? "Success" : "Failed") << endl;
+                break;
+            }
+
+            case 'm': {
+                cout << "Enter focus value (0-100): ";
+                int focus_val;
+                cin >> focus_val;
+                if (focus_val < 0) focus_val = 0;
+                if (focus_val > 100) focus_val = 100;
+                current_focus = focus_val;
+                cout << "Setting manual focus to " << focus_val << "..." << endl;
+                int32_t ret = dev->cameraSetFocusAbsolute(focus_val, false);
+                cout << (ret == 0 ? "Success" : "Failed") << endl;
+                break;
+            }
+
+            case 'k': {
+                current_focus += focus_step;
+                if (current_focus > 100) current_focus = 100;
+                cout << "Increasing focus to " << current_focus << "..." << endl;
+                int32_t ret = dev->cameraSetFocusAbsolute(current_focus, false);
+                cout << (ret == 0 ? "Success" : "Failed") << endl;
+                break;
+            }
+
+            case 'j': {
+                current_focus -= focus_step;
+                if (current_focus < 0) current_focus = 0;
+                cout << "Decreasing focus to " << current_focus << "..." << endl;
+                int32_t ret = dev->cameraSetFocusAbsolute(current_focus, false);
+                cout << (ret == 0 ? "Success" : "Failed") << endl;
+                break;
+            }
+
+            case 'h': {
+                cout << "Enabling HDR..." << endl;
+                int32_t ret = dev->cameraSetWdrR(1);  // 1 = DevWdrModeDol2TO1 (HDR enabled)
+                cout << (ret == 0 ? "Success" : "Failed") << endl;
+                break;
+            }
+
+            case 'H': {
+                cout << "Disabling HDR..." << endl;
+                int32_t ret = dev->cameraSetWdrR(0);  // 0 = DevWdrModeNone (HDR disabled)
+                cout << (ret == 0 ? "Success" : "Failed") << endl;
+                break;
+            }
+
+            case 'i': {
+                cout << "\nAI Mode Selection:" << endl;
+                cout << "0. None (AI Off)" << endl;
+                cout << "1. Group Tracking" << endl;
+                cout << "2. Single Human Tracking" << endl;
+                cout << "3. Hand Tracking" << endl;
+                cout << "4. Whiteboard Mode" << endl;
+                cout << "5. Desk Mode" << endl;
+                cout << "Enter AI mode (0-5): ";
+                int ai_mode;
+                cin >> ai_mode;
+                if (ai_mode >= 0 && ai_mode <= 5) {
+                    cout << "Setting AI mode to " << ai_mode << "..." << endl;
+                    int32_t ret = dev->cameraSetAiModeU(static_cast<Device::AiWorkModeType>(ai_mode));
+                    cout << (ret == 0 ? "Success" : "Failed") << endl;
+                } else {
+                    cout << "Invalid AI mode (0-5)" << endl;
+                }
+                break;
+            }
+
+            case 'I': {
+                cout << "Disabling AI Mode..." << endl;
+                int32_t ret = dev->cameraSetAiModeU(Device::AiWorkModeNone);
+                cout << (ret == 0 ? "Success" : "Failed") << endl;
                 break;
             }
 

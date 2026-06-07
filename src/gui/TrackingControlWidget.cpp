@@ -467,9 +467,13 @@ void TrackingControlWidget::updateTiny2Visibility()
 
 void TrackingControlWidget::updatePTZControlsState()
 {
-    // Disable PTZ controls when auto-framing is enabled
-    bool enabled = !m_trackingCheckBox->isChecked();
-    m_ptzContainer->setEnabled(enabled);
+    // Manual pan/tilt fights the AI tracker, so disable only the XY pad while
+    // tracking. Zoom and focus are compatible with tracking (the gimbal keeps
+    // following), so leave them adjustable.
+    bool tracking = m_trackingCheckBox->isChecked();
+    m_ptzContainer->setEnabled(true);
+    if (m_xyPad) m_xyPad->setEnabled(!tracking);
+    if (m_positionLabel) m_positionLabel->setEnabled(!tracking);
 }
 
 void TrackingControlWidget::flushPendingCommands()

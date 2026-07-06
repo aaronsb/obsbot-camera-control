@@ -461,6 +461,10 @@ void TrackingControlWidget::updateTiny2Visibility()
         return;
     }
 
+    // Re-read on every pass: the constructor runs before a camera is
+    // connected, so a value captured once there can never become true.
+    m_tiny2Capabilities = m_controller->hasTiny2Capabilities();
+
     m_advancedContainer->setVisible(m_tiny2Capabilities);
     m_humanSubModeCombo->setEnabled(m_tiny2Capabilities && m_modeCombo->currentData().toInt() == Device::AiWorkModeHuman);
 }

@@ -58,6 +58,13 @@ void CameraController::connectToCamera(const QString &devicePath)
             auto dev_list = Devices::get().getDevList();
             auto dev = pickDevice(dev_list);
             if (dev) {
+                // SDK enumeration may finish after the V4L2 fallback has
+                // already connected; drop the fallback so SDK-only controls
+                // (tracking, HDR) aren't left hidden by a stale flag.
+                if (m_v4l2Only) {
+                    m_v4l2.close();
+                    m_v4l2Only = false;
+                }
                 m_device = dev;
                 m_connected = true;
                 m_cameraInfo.name = QString::fromStdString(m_device->devName());
@@ -96,7 +103,15 @@ void CameraController::connectToCamera(const QString &devicePath)
             updateState();
         }
     } else {
-        tryV4l2Fallback();
+        // The SDK enumerates devices on a background thread and its connect
+        // handshake takes several seconds, so the list is almost always
+        // still empty here. An immediate fallback would win that race every
+        // launch and lock the UI into V4L2-only mode; give the SDK a grace
+        // period before settling for plain V4L2.
+        QTimer::singleShot(8000, this, [this]() {
+            if (!m_connected)
+                tryV4l2Fallback();
+        });
     }
 }
 

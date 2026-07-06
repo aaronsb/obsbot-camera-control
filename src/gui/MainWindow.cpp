@@ -1103,6 +1103,13 @@ void MainWindow::onCameraDisconnected()
 
 void MainWindow::onStateChanged(const CameraController::CameraState &state)
 {
+    // Re-sync mode-dependent visibility: the connection can upgrade from
+    // the V4L2 fallback to a full SDK session after onCameraConnected ran,
+    // and a snapshot taken there would hide these controls forever.
+    bool v4l2Mode = m_controller->isV4l2Only();
+    m_trackingWidget->setV4l2Mode(v4l2Mode);
+    m_settingsWidget->setV4l2Mode(v4l2Mode);
+
     // Update all widgets with new state
     m_trackingWidget->updateFromState(state);
     m_settingsWidget->updateFromState(state);

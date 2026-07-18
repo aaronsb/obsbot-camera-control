@@ -155,6 +155,8 @@ private:
     bool m_v4l2Only = false;
     V4l2Backend m_v4l2;
     QTimer *m_v4l2ScanTimer = nullptr;
+    QTimer *m_sdkGraceTimer = nullptr;  // Waits for async SDK detection before V4L2 fallback
+    int m_sdkGraceElapsedMs = 0;
     QString m_v4l2DevicePath;
     CameraInfo m_cameraInfo;
     CameraState m_currentState;
@@ -170,6 +172,9 @@ private:
     bool m_whiteBalanceFallbackActive;
     int m_fallbackWhiteBalanceMode;
     bool isTiny2Family() const;
+    std::shared_ptr<Device> pickSdkDevice(const std::list<std::shared_ptr<Device>> &list) const;
+    void connectSdkDevice(const std::shared_ptr<Device> &dev);
+    void startSdkGraceThenFallback();
     void tryV4l2Fallback();
     void connectV4l2(const std::string &devicePath);
     void refreshV4l2ControlRanges();

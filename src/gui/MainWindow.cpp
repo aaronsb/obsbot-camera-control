@@ -1056,7 +1056,12 @@ void MainWindow::onCameraConnected(const CameraController::CameraInfo &info)
     m_trackingWidget->setV4l2Mode(v4l2Mode);
     m_settingsWidget->setV4l2Mode(v4l2Mode);
 
-    QTimer::singleShot(100, this, [this]() {
+    // cameraConnected is emitted immediately before the controller publishes
+    // the camera's initial state. Capture the configured/user-intended values
+    // now, otherwise that initial state (Tiny 4K boots with Wide FOV) replaces
+    // the UI value before the delayed reapply runs.
+    const CameraController::CameraState intendedState = getUIState();
+    QTimer::singleShot(100, this, [this, intendedState]() {
         if (m_isCameraSwitch) {
             // Pull the new camera's actual state into the UI
             // without pushing the old camera's state back
@@ -1064,7 +1069,7 @@ void MainWindow::onCameraConnected(const CameraController::CameraInfo &info)
             onStateChanged(state);
             m_isCameraSwitch = false;
         } else {
-            m_controller->applyCurrentStateToCamera(getUIState());
+            m_controller->applyCurrentStateToCamera(intendedState);
         }
     });
 

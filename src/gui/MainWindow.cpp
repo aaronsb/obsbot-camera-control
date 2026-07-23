@@ -1172,7 +1172,7 @@ void MainWindow::updateStatus()
 
     QStringList statusParts;
     statusParts << QString("AI: %1").arg(state.autoFramingEnabled ? "On" : "Off");
-    statusParts << QString("Zoom: %1%").arg(state.zoomRatio);
+    statusParts << QString("Zoom: %1x").arg(state.zoom, 0, 'f', 2);
     statusParts << QString("HDR: %1").arg(state.hdrEnabled ? "On" : "Off");
     statusParts << QString("Face AE: %1").arg(state.faceAEEnabled ? "On" : "Off");
     statusParts << QString("Focus: %1").arg(state.autoFocusEnabled ? "Auto" : "Manual");

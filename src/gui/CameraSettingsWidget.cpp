@@ -212,9 +212,9 @@ CameraSettingsWidget::CameraSettingsWidget(CameraController *controller, QWidget
         });
         speedLayout->addWidget(button, row, column);
     };
-    addSpeedButton("↑", 0, 1, 30.0, 0.0);
+    addSpeedButton("↑", 0, 1, -30.0, 0.0);
     addSpeedButton("←", 1, 0, 0.0, -45.0);
-    addSpeedButton("↓", 1, 1, -30.0, 0.0);
+    addSpeedButton("↓", 1, 1, 30.0, 0.0);
     addSpeedButton("→", 1, 2, 0.0, 45.0);
     deviceLayout->addLayout(speedLayout);
 

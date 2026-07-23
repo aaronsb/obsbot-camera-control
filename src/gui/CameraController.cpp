@@ -5,6 +5,28 @@
 
 static constexpr int kDefaultWhiteBalanceKelvin = 4800;
 
+static QString productDisplayName(int productType, const QString &fallback)
+{
+    switch (productType) {
+    case ObsbotProdTiny:      return QStringLiteral("OBSBOT Tiny");
+    case ObsbotProdTiny4k:    return QStringLiteral("OBSBOT Tiny 4K");
+    case ObsbotProdTiny2:     return QStringLiteral("OBSBOT Tiny 2");
+    case ObsbotProdTiny2Lite: return QStringLiteral("OBSBOT Tiny 2 Lite");
+    case ObsbotProdTinySE:    return QStringLiteral("OBSBOT Tiny SE");
+    case ObsbotProdTailAir:   return QStringLiteral("OBSBOT Tail Air");
+    case ObsbotProdTail2:     return QStringLiteral("OBSBOT Tail 2");
+    case ObsbotProdTail2S:    return QStringLiteral("OBSBOT Tail 2S");
+    case ObsbotProdMeet:      return QStringLiteral("OBSBOT Meet");
+    case ObsbotProdMeet4k:    return QStringLiteral("OBSBOT Meet 4K");
+    case ObsbotProdMeet2:     return QStringLiteral("OBSBOT Meet 2");
+    case ObsbotProdMeetSE:    return QStringLiteral("OBSBOT Meet SE");
+    case ObsbotProdMe:        return QStringLiteral("OBSBOT Me");
+    case ObsbotProdHDMIBox:   return QStringLiteral("OBSBOT HDMI Box");
+    case ObsbotProdNDIBox:    return QStringLiteral("OBSBOT NDI Box");
+    default:                  return fallback;
+    }
+}
+
 static int shutterTypeToV4l2(int shutterType)
 {
     static constexpr double denominators[] = {
@@ -85,7 +107,8 @@ void CameraController::connectToCamera(const QString &devicePath)
                 }
                 m_device = dev;
                 m_connected = true;
-                m_cameraInfo.name = QString::fromStdString(m_device->devName());
+                m_cameraInfo.name = productDisplayName(
+                    m_device->productType(), QString::fromStdString(m_device->devName()));
                 m_cameraInfo.serialNumber = QString::fromStdString(m_device->devSn());
                 m_cameraInfo.version = QString::fromStdString(m_device->devVersion());
                 m_cameraInfo.productType = m_device->productType();
@@ -111,7 +134,8 @@ void CameraController::connectToCamera(const QString &devicePath)
         if (dev) {
             m_device = dev;
             m_connected = true;
-            m_cameraInfo.name = QString::fromStdString(m_device->devName());
+            m_cameraInfo.name = productDisplayName(
+                m_device->productType(), QString::fromStdString(m_device->devName()));
             m_cameraInfo.serialNumber = QString::fromStdString(m_device->devSn());
             m_cameraInfo.version = QString::fromStdString(m_device->devVersion());
             m_cameraInfo.productType = m_device->productType();

@@ -161,6 +161,7 @@ MainWindow::MainWindow(QWidget *parent)
     , m_snapshotToClipboard(false)
     , m_virtualCameraErrorNotified(false)
     , m_virtualCameraAvailable(false)
+    , m_pollTick(3)
 {
     setWindowTitle("OBSBOT Control");
     setWindowIcon(QIcon(":/icons/camera.svg"));
@@ -210,7 +211,7 @@ MainWindow::MainWindow(QWidget *parent)
     // Update status periodically
     m_statusTimer = new QTimer(this);
     connect(m_statusTimer, &QTimer::timeout, this, &MainWindow::updateStatus);
-    m_statusTimer->start(2000);
+    m_statusTimer->start(500);
 }
 
 MainWindow::~MainWindow()
@@ -438,6 +439,7 @@ void MainWindow::setupUI()
 
     // Resize tab widget to fit the current tab (QTabWidget normally sizes to the tallest)
     connect(m_tabWidget, &QTabWidget::currentChanged, this, [this](int) {
+        m_pollTick = 3; // Refresh newly visible image controls on the next tick.
         fitTabToCurrentPage();
     });
     QTimer::singleShot(0, this, &MainWindow::fitTabToCurrentPage);
@@ -1168,7 +1170,15 @@ void MainWindow::updateStatus()
         return;
     }
 
-    auto state = m_controller->getCurrentState();
+    const bool background = !isVisible() || isMinimized();
+    const int desiredInterval = background ? 3000 : 500;
+    if (m_statusTimer->interval() != desiredInterval)
+        m_statusTimer->setInterval(desiredInterval);
+
+    const bool imageTabVisible = !background
+        && m_tabWidget->currentWidget() == m_settingsWidget;
+    const bool pollImageControls = imageTabVisible && (++m_pollTick % 4 == 0);
+    auto state = m_controller->pollCurrentState(pollImageControls);
 
     QStringList statusParts;
     statusParts << QString("AI: %1").arg(state.autoFramingEnabled ? "On" : "Off");

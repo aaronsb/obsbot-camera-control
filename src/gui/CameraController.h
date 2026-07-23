@@ -99,6 +99,7 @@ public:
 
     // State
     CameraState getCurrentState();
+    CameraState pollCurrentState(bool includeImageControls);
     bool hasTiny2Capabilities() const;
     bool hasOriginalTinyCapabilities() const { return isOriginalTinyFamily(); }
     bool hasTiny4kCapabilities() const { return isTiny4k(); }
@@ -221,11 +222,11 @@ private:
     void tryV4l2Fallback();
     void connectV4l2(const std::string &devicePath);
     void refreshV4l2ControlRanges();
-    void updateV4l2State();
+    void updateV4l2State(bool includeImageControls = true);
 
     // Helper
     bool executeCommand(const QString &description, std::function<int32_t()> command);
-    void updateState();
+    void updateState(bool includeImageControls = true);
     void saveCurrentStateToConfig();  // Update config with current camera state
     void refreshControlRanges();
     void resetControlRanges();

@@ -218,20 +218,22 @@ void CameraController::refreshV4l2ControlRanges()
     m_supportedWhiteBalanceTypes.push_back(static_cast<int>(Device::DevWhiteBalanceManual));
 }
 
-void CameraController::updateV4l2State()
+void CameraController::updateV4l2State(bool includeImageControls)
 {
     if (!m_v4l2.isOpen())
         return;
 
-    m_currentState.brightness = m_v4l2.getBrightness();
-    m_currentState.contrast = m_v4l2.getContrast();
-    m_currentState.saturation = m_v4l2.getSaturation();
+    if (includeImageControls) {
+        m_currentState.brightness = m_v4l2.getBrightness();
+        m_currentState.contrast = m_v4l2.getContrast();
+        m_currentState.saturation = m_v4l2.getSaturation();
 
-    bool autoWb = m_v4l2.getWhiteBalanceAuto();
-    m_currentState.whiteBalance = autoWb
-        ? static_cast<int>(Device::DevWhiteBalanceAuto)
-        : static_cast<int>(Device::DevWhiteBalanceManual);
-    m_currentState.whiteBalanceKelvin = m_v4l2.getWhiteBalanceTemperature();
+        bool autoWb = m_v4l2.getWhiteBalanceAuto();
+        m_currentState.whiteBalance = autoWb
+            ? static_cast<int>(Device::DevWhiteBalanceAuto)
+            : static_cast<int>(Device::DevWhiteBalanceManual);
+        m_currentState.whiteBalanceKelvin = m_v4l2.getWhiteBalanceTemperature();
+    }
 
     auto zoomRange = m_v4l2.getZoomRange();
     int zoomMax = zoomRange.valid ? zoomRange.max : 100;
@@ -534,6 +536,17 @@ bool CameraController::centerView()
         return success;
     }
     return setPanTilt(0.0, 0.0);
+}
+
+CameraController::CameraState CameraController::pollCurrentState(bool includeImageControls)
+{
+    if (m_connected && !isSettling()) {
+        if (m_v4l2Only)
+            updateV4l2State(includeImageControls);
+        else
+            updateState(includeImageControls);
+    }
+    return isSettling() ? m_cachedState : m_currentState;
 }
 
 bool CameraController::setHDR(bool enabled)
@@ -1052,7 +1065,7 @@ bool CameraController::executeCommand(const QString &description, std::function<
     return true;
 }
 
-void CameraController::updateState()
+void CameraController::updateState(bool includeImageControls)
 {
     if (!m_connected) return;
 
@@ -1096,6 +1109,7 @@ void CameraController::updateState()
     m_currentState.trackSpeedMode = status.tiny.ai_tracker_speed;
     m_currentState.audioAutoGainEnabled = status.tiny.audio_auto_gain;
 
+    if (includeImageControls) {
     // Image controls - read current values from camera
     // Note: Preserve auto mode flags - camera doesn't have concept of "auto" for these
     bool preservedBrightnessAuto = m_currentState.brightnessAuto;
@@ -1160,6 +1174,7 @@ void CameraController::updateState()
         m_currentState.whiteBalance = m_fallbackWhiteBalanceMode;
     } else {
         m_lastRequestedWhiteBalance = m_currentState.whiteBalance;
+    }
     }
 
     emit stateChanged(m_currentState);

@@ -133,6 +133,7 @@ private:
 
     // Status timer
     QTimer *m_statusTimer;
+    int m_pollTick;
 
     // Track preview state before minimize
     bool m_previewStateBeforeMinimize;

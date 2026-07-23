@@ -568,6 +568,7 @@ void TrackingControlWidget::updatePTZControlsState()
     // Disable PTZ controls when auto-framing is enabled
     bool enabled = !m_trackingCheckBox->isChecked();
     m_ptzContainer->setEnabled(enabled);
+    m_originalTinyContainer->setEnabled(!enabled);
 }
 
 void TrackingControlWidget::flushPendingCommands()

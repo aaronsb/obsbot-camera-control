@@ -55,7 +55,10 @@ VideoEffectsWidget::VideoEffectsWidget(QWidget *parent)
     rootLayout->setContentsMargins(12, 12, 12, 12);
     rootLayout->setSpacing(12);
 
-    QLabel *infoLabel = new QLabel(tr("Creative adjustments are applied in software and do not change the camera's onboard settings."), this);
+    QLabel *infoLabel = new QLabel(
+        tr("Effects are applied only to the preview, snapshots, and virtual camera. "
+           "They do not change the physical camera output."),
+        this);
     infoLabel->setWordWrap(true);
     infoLabel->setStyleSheet("color: palette(mid); font-size: 11px;");
     rootLayout->addWidget(infoLabel);

@@ -432,7 +432,7 @@ void MainWindow::setupUI()
     m_effectsWidget = new VideoEffectsWidget(this);
     connect(m_effectsWidget, &VideoEffectsWidget::effectsChanged,
             this, &MainWindow::onVideoEffectsChanged);
-    m_tabWidget->addTab(m_effectsWidget, tr("Creative FX"));
+    m_tabWidget->addTab(m_effectsWidget, tr("FX"));
     scrollLayout->addWidget(m_tabWidget);
     m_effectsWidget->reset();
 

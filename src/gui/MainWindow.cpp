@@ -421,13 +421,15 @@ void MainWindow::setupUI()
     m_ptzWidget = new PTZControlWidget(m_controller, this);
     m_settingsWidget = new CameraSettingsWidget(m_controller, this);
     m_ptzWidget->setCameraSettingsWidget(m_settingsWidget);
+    m_trackingWidget->setPositionPresetsWidget(
+        m_ptzWidget->positionPresetsGroup());
     connect(m_ptzWidget, &PTZControlWidget::presetUpdated,
             this, &MainWindow::onPresetUpdated);
 
     m_tabWidget = new QTabWidget(scrollContent);
     m_tabWidget->setObjectName("controlTabs");
     m_tabWidget->setDocumentMode(true);
-    m_tabWidget->addTab(m_trackingWidget, tr("Tracking"));
+    m_tabWidget->addTab(m_trackingWidget, tr("Console"));
     m_tabWidget->addTab(m_ptzWidget, tr("Presets"));
     m_tabWidget->addTab(m_settingsWidget, tr("Image"));
     m_effectsWidget = new VideoEffectsWidget(this);

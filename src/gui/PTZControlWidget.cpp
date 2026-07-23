@@ -7,14 +7,15 @@ PTZControlWidget::PTZControlWidget(CameraController *controller, QWidget *parent
     : QWidget(parent)
     , m_controller(controller)
     , m_settingsWidget(nullptr)
+    , m_positionPresetGroup(nullptr)
 {
     QVBoxLayout *layout = new QVBoxLayout(this);
     layout->setContentsMargins(8, 14, 8, 14);
     layout->setSpacing(14);
 
     // Presets section
-    QGroupBox *presetGroup = new QGroupBox("Position Presets", this);
-    QVBoxLayout *presetLayout = new QVBoxLayout(presetGroup);
+    m_positionPresetGroup = new QGroupBox("Position Presets", this);
+    QVBoxLayout *presetLayout = new QVBoxLayout(m_positionPresetGroup);
     presetLayout->setContentsMargins(16, 16, 16, 16);
     presetLayout->setSpacing(8);
 
@@ -51,7 +52,7 @@ PTZControlWidget::PTZControlWidget(CameraController *controller, QWidget *parent
         updatePresetLabel(i);
     }
 
-    layout->addWidget(presetGroup);
+    layout->addWidget(m_positionPresetGroup);
 
     // Image Quality Presets section
     QGroupBox *imagePresetGroup = new QGroupBox("Image Quality Presets", this);

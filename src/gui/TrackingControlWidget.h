@@ -28,6 +28,7 @@ public:
 
     void updateFromState(const CameraController::CameraState &state);
     void setV4l2Mode(bool v4l2Only);
+    void setPositionPresetsWidget(QWidget *widget);
     bool isTrackingEnabled() const { return m_trackingCheckBox->isChecked(); }
     void setTrackingEnabled(bool enabled) {
         m_trackingCheckBox->blockSignals(true);

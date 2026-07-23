@@ -27,7 +27,7 @@ TrackingControlWidget::TrackingControlWidget(CameraController *controller, QWidg
     layout->setContentsMargins(8, 14, 8, 14);
     layout->setSpacing(14);
 
-    m_trackingGroupBox = new QGroupBox("Face Tracking", this);
+    m_trackingGroupBox = new QGroupBox("AI Tracking", this);
     m_trackingGroupBox->setFlat(true);
     QVBoxLayout *groupLayout = new QVBoxLayout(m_trackingGroupBox);
     groupLayout->setContentsMargins(16, 16, 16, 16);
@@ -44,11 +44,17 @@ TrackingControlWidget::TrackingControlWidget(CameraController *controller, QWidg
     QHBoxLayout *originalTinyLayout = new QHBoxLayout(m_originalTinyContainer);
     originalTinyLayout->setContentsMargins(0, 8, 0, 0);
     static const char *trackingStyleLabels[] = {
-        "Standard", "Headroom", "Motion"
+        "Headroom", "Standard", "Motion"
     };
-    for (int style = 0; style < 3; ++style) {
+    static constexpr int trackingStyles[] = {
+        Device::AiVTrackHeadroom,
+        Device::AiVTrackStandard,
+        Device::AiVTrackMotion
+    };
+    for (int position = 0; position < 3; ++position) {
+        const int style = trackingStyles[position];
         m_trackingStyleButtons[style] =
-            new QPushButton(trackingStyleLabels[style], this);
+            new QPushButton(trackingStyleLabels[position], this);
         m_trackingStyleButtons[style]->setCheckable(true);
         connect(m_trackingStyleButtons[style], &QPushButton::clicked,
                 this, [this, style]() { onTrackingStyleChanged(style); });
@@ -129,10 +135,9 @@ TrackingControlWidget::TrackingControlWidget(CameraController *controller, QWidg
     layout->addWidget(m_trackingGroupBox);
 
     // Zoom remains available while auto-framing is enabled.
-    QGroupBox *zoomGroupBox = new QGroupBox("Zoom", this);
-    zoomGroupBox->setFlat(true);
-    QVBoxLayout *zoomGroupLayout = new QVBoxLayout(zoomGroupBox);
-    zoomGroupLayout->setContentsMargins(16, 16, 16, 16);
+    QWidget *zoomControls = new QWidget(this);
+    QVBoxLayout *zoomGroupLayout = new QVBoxLayout(zoomControls);
+    zoomGroupLayout->setContentsMargins(0, 12, 0, 0);
     zoomGroupLayout->setSpacing(8);
 
     QHBoxLayout *zoomLayout = new QHBoxLayout();
@@ -163,7 +168,6 @@ TrackingControlWidget::TrackingControlWidget(CameraController *controller, QWidg
         fovLayout->addWidget(m_fovButtons[mode]);
     }
     zoomGroupLayout->addLayout(fovLayout);
-    layout->addWidget(zoomGroupBox);
 
     // Focus remains available while auto-framing is enabled.
     QGroupBox *focusGroupBox = new QGroupBox("Focus", this);
@@ -198,7 +202,7 @@ TrackingControlWidget::TrackingControlWidget(CameraController *controller, QWidg
     ptzContainerLayout->setContentsMargins(0, 0, 0, 0);
     ptzContainerLayout->setSpacing(0);
 
-    QGroupBox *ptzGroupBox = new QGroupBox("Manual Control", this);
+    QGroupBox *ptzGroupBox = new QGroupBox("Vision and Gimbal", this);
     ptzGroupBox->setFlat(true);
     QVBoxLayout *ptzGroupLayout = new QVBoxLayout(ptzGroupBox);
     ptzGroupLayout->setContentsMargins(16, 16, 16, 16);
@@ -232,6 +236,7 @@ TrackingControlWidget::TrackingControlWidget(CameraController *controller, QWidg
     m_positionLabel->setAlignment(Qt::AlignCenter);
     m_positionLabel->setStyleSheet("color: palette(mid); font-size: 11px;");
     ptzGroupLayout->addWidget(m_positionLabel);
+    ptzGroupLayout->addWidget(zoomControls);
 
     ptzContainerLayout->addWidget(ptzGroupBox);
     layout->addWidget(m_ptzContainer);
@@ -240,6 +245,21 @@ TrackingControlWidget::TrackingControlWidget(CameraController *controller, QWidg
     updatePTZControlsState();
 
     layout->addStretch();
+}
+
+void TrackingControlWidget::setPositionPresetsWidget(QWidget *widget)
+{
+    if (!widget) {
+        return;
+    }
+    if (QWidget *oldParent = widget->parentWidget()) {
+        if (QLayout *oldLayout = oldParent->layout()) {
+            oldLayout->removeWidget(widget);
+        }
+    }
+    if (auto *pageLayout = qobject_cast<QVBoxLayout*>(layout())) {
+        pageLayout->insertWidget(0, widget);
+    }
 }
 
 void TrackingControlWidget::setAiMode(int mode)
@@ -567,7 +587,9 @@ void TrackingControlWidget::updatePTZControlsState()
 {
     // Disable PTZ controls when auto-framing is enabled
     bool enabled = !m_trackingCheckBox->isChecked();
-    m_ptzContainer->setEnabled(enabled);
+    m_xyPad->setEnabled(enabled);
+    m_invertControlsCheckBox->setEnabled(enabled);
+    m_positionLabel->setEnabled(enabled);
     m_originalTinyContainer->setEnabled(!enabled);
 }
 

@@ -25,6 +25,7 @@ public:
     void setCameraSettingsWidget(CameraSettingsWidget *settingsWidget) {
         m_settingsWidget = settingsWidget;
     }
+    QGroupBox *positionPresetsGroup() const { return m_positionPresetGroup; }
 
     struct PresetState {
         bool defined;
@@ -66,6 +67,7 @@ private slots:
 private:
     CameraController *m_controller;
     CameraSettingsWidget *m_settingsWidget;
+    QGroupBox *m_positionPresetGroup;
 
     struct PresetUi {
         QPushButton *recallButton;

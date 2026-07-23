@@ -119,6 +119,11 @@ offer_path_update() {
     print_msg "$BLUE" "    export PATH=\"\$HOME/.local/bin:\$PATH\""
     echo ""
 
+    if [ ! -t 0 ]; then
+        print_msg "$YELLOW" "Non-interactive install: skipping shell configuration update."
+        return 0
+    fi
+
     read -p "Would you like me to add this to your shell config automatically? [y/N] " -n 1 -r
     echo
 
@@ -339,11 +344,6 @@ check_dependencies() {
         return 1
     }
 
-    # Helper: check if Qt6 is available via qtpaths6
-    have_qtpaths6() {
-        command -v qtpaths6 >/dev/null 2>&1 || command -v qtpaths-qt6 >/dev/null 2>&1
-    }
-
     # Helper: get Qt6 version from qtpaths
     get_qt6_version() {
         if command -v qtpaths6 >/dev/null 2>&1; then
@@ -353,7 +353,9 @@ check_dependencies() {
         fi
     }
 
-    # Helper: generic component check with pkg-config, CMake, or qtpaths fallback
+    # Helper: check for the development metadata CMake needs. qtpaths6 alone
+    # only proves that the Qt runtime is installed and must not satisfy this
+    # check (for example, Ubuntu ships it without Qt6Config.cmake).
     check_qt_component() {
         local label="$1"      # Display label
         local pc_name="$2"    # pkg-config name
@@ -377,17 +379,6 @@ check_dependencies() {
                 print_msg "$GREEN" "  ✓ $label ($ver via CMake)"
             else
                 print_msg "$GREEN" "  ✓ $label (via CMake)"
-            fi
-            return 0
-        fi
-
-        # Try qtpaths6 as last resort (confirms Qt6 exists even if module detection fails)
-        if have_qtpaths6; then
-            local ver=$(get_qt6_version)
-            if [ -n "$ver" ]; then
-                print_msg "$GREEN" "  ✓ $label ($ver via qtpaths)"
-            else
-                print_msg "$GREEN" "  ✓ $label (via qtpaths)"
             fi
             return 0
         fi
@@ -506,12 +497,20 @@ do_install() {
 
     local installed_apps="  - obsbot-gui"
 
-    # Ask about CLI installation
-    echo ""
-    read -p "Install CLI tool as well? [y/N] " -n 1 -r
-    echo
+    # Ask about CLI installation when interactive. In unattended installs,
+    # install both binaries so --confirm can complete without stdin.
+    local install_cli=false
+    if [ -t 0 ]; then
+        echo ""
+        read -p "Install CLI tool as well? [y/N] " -n 1 -r
+        echo
+        [[ $REPLY =~ ^[Yy]$ ]] && install_cli=true
+    else
+        install_cli=true
+        print_msg "$BLUE" "Non-interactive install: including CLI tool."
+    fi
 
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
+    if [ "$install_cli" = true ]; then
         print_msg "$BLUE" "Installing CLI tool..."
         cp "$BIN_DIR/obsbot-cli" "$INSTALL_DIR/"
         chmod +x "$INSTALL_DIR/obsbot-cli"

@@ -295,13 +295,6 @@ void TrackingControlWidget::updateFromState(const CameraController::CameraState 
     bool commandInFlight = m_commandTimer->isActive();
     bool isSettling = m_controller->isSettling();
 
-    int trackingStyleIndex = m_trackingStyleCombo->findData(state.trackingStyle);
-    if (trackingStyleIndex >= 0 && !m_userInitiated && !commandInFlight && !isSettling) {
-        m_trackingStyleCombo->blockSignals(true);
-        m_trackingStyleCombo->setCurrentIndex(trackingStyleIndex);
-        m_trackingStyleCombo->blockSignals(false);
-    }
-
     if (m_trackingCheckBox->isChecked() != shouldBeChecked && !m_userInitiated && !commandInFlight && !isSettling) {
         m_trackingCheckBox->blockSignals(true);
         m_trackingCheckBox->setChecked(shouldBeChecked);

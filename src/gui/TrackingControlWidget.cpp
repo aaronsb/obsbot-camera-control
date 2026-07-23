@@ -43,7 +43,6 @@ TrackingControlWidget::TrackingControlWidget(CameraController *controller, QWidg
     m_originalTinyContainer = new QWidget(this);
     QHBoxLayout *originalTinyLayout = new QHBoxLayout(m_originalTinyContainer);
     originalTinyLayout->setContentsMargins(0, 8, 0, 0);
-    originalTinyLayout->addWidget(new QLabel("Tracking Style", this));
     static const char *trackingStyleLabels[] = {
         "Standard", "Headroom", "Motion"
     };

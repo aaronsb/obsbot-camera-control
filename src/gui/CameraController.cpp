@@ -1085,7 +1085,7 @@ void CameraController::updateState(bool includeImageControls)
     // regardless of the actual zoom. Its status field reliably reports a
     // 0..100 offset from 1.0x instead.
     const bool zoomPollingPaused =
-        m_zoomPollingPause.isValid() && m_zoomPollingPause.elapsed() < 1000;
+        m_zoomPollingPause.isValid() && m_zoomPollingPause.elapsed() < 2000;
     if (!zoomPollingPaused) {
         if (isOriginalTinyFamily() && status.tiny.zoom_ratio <= 100) {
             m_currentState.zoom = 1.0

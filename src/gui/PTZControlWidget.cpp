@@ -250,12 +250,10 @@ void PTZControlWidget::updatePresetLabel(int index)
         preset.defined
             ? QString()
             : QString("color: palette(mid); background-color: palette(midlight);"));
-    preset.recallButton->setToolTip(preset.defined
-        ? QString("Pan %1, Tilt %2, Zoom %3x")
-              .arg(preset.pan, 0, 'f', 2)
-              .arg(preset.tilt, 0, 'f', 2)
-              .arg(preset.zoom, 0, 'f', 2)
-        : QString("Empty preset"));
+    // Hardware-backed models can save a real gimbal position while reporting
+    // zero for absolute pan/tilt, so do not present cached coordinates as fact.
+    preset.recallButton->setToolTip(
+        preset.defined ? "Saved camera preset" : "Empty preset");
 }
 
 void PTZControlWidget::onStoreImagePreset()

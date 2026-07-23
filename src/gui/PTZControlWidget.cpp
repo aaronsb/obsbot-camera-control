@@ -13,7 +13,7 @@ PTZControlWidget::PTZControlWidget(CameraController *controller, QWidget *parent
     layout->setSpacing(14);
 
     // Presets section
-    QGroupBox *presetGroup = new QGroupBox("Camera Presets", this);
+    QGroupBox *presetGroup = new QGroupBox("Position Presets", this);
     QVBoxLayout *presetLayout = new QVBoxLayout(presetGroup);
     presetLayout->setContentsMargins(16, 16, 16, 16);
     presetLayout->setSpacing(8);

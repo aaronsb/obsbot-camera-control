@@ -150,7 +150,7 @@ TrackingControlWidget::TrackingControlWidget(CameraController *controller, QWidg
 
     QHBoxLayout *fovLayout = new QHBoxLayout();
     static const char *fovLabels[] = {
-        "Wide (86°)", "Medium (78°)", "Narrow (65°)"
+        "86°", "78°", "65°"
     };
     for (int mode = 0; mode < 3; ++mode) {
         m_fovButtons[mode] = new QPushButton(fovLabels[mode], this);

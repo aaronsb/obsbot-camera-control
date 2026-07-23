@@ -23,16 +23,21 @@ CameraSettingsWidget::CameraSettingsWidget(CameraController *controller, QWidget
     layout->setContentsMargins(8, 8, 8, 14);
     layout->setSpacing(14);
 
-    m_advancedGroupBox = new QGroupBox("Advanced Camera Settings", this);
-    QVBoxLayout *groupLayout = new QVBoxLayout(m_advancedGroupBox);
-    groupLayout->setContentsMargins(16, 16, 16, 16);
-    groupLayout->setSpacing(10);
+    m_advancedGroupBox = new QGroupBox("HDR", this);
+    QVBoxLayout *hdrLayout = new QVBoxLayout(m_advancedGroupBox);
+    hdrLayout->setContentsMargins(16, 16, 16, 16);
 
     // HDR
     m_hdrCheckBox = new QCheckBox("HDR (High Dynamic Range)", this);
     m_hdrCheckBox->setToolTip("Enhance image quality in high-contrast scenes");
     connect(m_hdrCheckBox, &QCheckBox::toggled, this, &CameraSettingsWidget::onHDRToggled);
-    groupLayout->addWidget(m_hdrCheckBox);
+    hdrLayout->addWidget(m_hdrCheckBox);
+    layout->addWidget(m_advancedGroupBox);
+
+    m_exposureGroupBox = new QGroupBox("Exposure", this);
+    QVBoxLayout *groupLayout = new QVBoxLayout(m_exposureGroupBox);
+    groupLayout->setContentsMargins(16, 16, 16, 16);
+    groupLayout->setSpacing(10);
 
     // Retained as an internal state holder for configuration and image
     // presets; the visible controls live beside the Zoom slider.
@@ -90,17 +95,18 @@ CameraSettingsWidget::CameraSettingsWidget(CameraController *controller, QWidget
             this, &CameraSettingsWidget::onAntiFlickerChanged);
     antiFlickerLayout->addWidget(m_antiFlickerComboBox);
     antiFlickerLayout->addStretch();
-    groupLayout->addLayout(antiFlickerLayout);
-
-    layout->addWidget(m_advancedGroupBox);
+    layout->addWidget(m_exposureGroupBox);
 
     m_tiny4kDeviceGroup = new QGroupBox("Tiny 4K Device Controls", this);
     QVBoxLayout *deviceLayout = new QVBoxLayout(m_tiny4kDeviceGroup);
 
-    auto addUvcSlider = [this, deviceLayout](const QString &label,
+    auto addUvcSlider = [this, groupLayout](const QString &label,
+                                             QWidget *&rowWidget,
                                              QSlider *&slider,
                                              auto setter) {
-        QHBoxLayout *row = new QHBoxLayout();
+        rowWidget = new QWidget(this);
+        QHBoxLayout *row = new QHBoxLayout(rowWidget);
+        row->setContentsMargins(0, 0, 0, 0);
         row->addWidget(new QLabel(label, this));
         slider = new QSlider(Qt::Horizontal, this);
         row->addWidget(slider);
@@ -110,28 +116,30 @@ CameraSettingsWidget::CameraSettingsWidget(CameraController *controller, QWidget
             (m_controller->*setter)(value);
             m_commandTimer->start(1000);
         });
-        deviceLayout->addLayout(row);
+        groupLayout->addWidget(rowWidget);
         return reset;
     };
     QPushButton *exposureReset = addUvcSlider(
-        "Exposure:", m_uvcExposureSlider, &CameraController::setTiny4kExposure);
+        "Exposure:", m_uvcExposureRow, m_uvcExposureSlider,
+        &CameraController::setTiny4kExposure);
     connect(exposureReset, &QPushButton::clicked, this, [this]() {
         auto range = m_controller->getTiny4kExposureRange();
         if (range.valid) m_uvcExposureSlider->setValue(range.defaultValue);
     });
     QPushButton *gainReset = addUvcSlider(
-        "Gain:", m_gainSlider, &CameraController::setTiny4kGain);
+        "Gain:", m_gainRow, m_gainSlider, &CameraController::setTiny4kGain);
     connect(gainReset, &QPushButton::clicked, this, [this]() {
         auto range = m_controller->getGainRange();
         if (range.valid) m_gainSlider->setValue(range.defaultValue);
     });
     QPushButton *backlightReset = addUvcSlider(
-        "Backlight:", m_backlightSlider,
+        "Backlight:", m_backlightRow, m_backlightSlider,
         &CameraController::setTiny4kBacklightCompensation);
     connect(backlightReset, &QPushButton::clicked, this, [this]() {
         auto range = m_controller->getBacklightCompensationRange();
         if (range.valid) m_backlightSlider->setValue(range.defaultValue);
     });
+    groupLayout->addLayout(antiFlickerLayout);
 
     QCheckBox *gestureTracking = new QCheckBox("Tracking Gesture", this);
     connect(gestureTracking, &QCheckBox::toggled, this, [this](bool enabled) {
@@ -239,11 +247,11 @@ CameraSettingsWidget::CameraSettingsWidget(CameraController *controller, QWidget
     });
     dangerLayout->addWidget(factoryReset);
     deviceLayout->addLayout(dangerLayout);
-    layout->addWidget(m_tiny4kDeviceGroup);
+    // Remaining device-specific actions are exposed on the More tab.
 
     // Image Controls Group
-    QGroupBox *imageGroupBox = new QGroupBox("Image Controls", this);
-    QVBoxLayout *imageLayout = new QVBoxLayout(imageGroupBox);
+    m_imageGroupBox = new QGroupBox("Image", this);
+    QVBoxLayout *imageLayout = new QVBoxLayout(m_imageGroupBox);
     imageLayout->setContentsMargins(16, 16, 16, 16);
     imageLayout->setSpacing(10);
 
@@ -335,7 +343,6 @@ CameraSettingsWidget::CameraSettingsWidget(CameraController *controller, QWidget
         m_controller->setHue(value);
     });
     hueLayout->addWidget(hueReset);
-    imageLayout->addLayout(hueLayout);
 
     QHBoxLayout *sharpnessLayout = new QHBoxLayout();
     sharpnessLayout->addWidget(new QLabel("Sharpness:", this));
@@ -355,8 +362,14 @@ CameraSettingsWidget::CameraSettingsWidget(CameraController *controller, QWidget
     });
     sharpnessLayout->addWidget(sharpnessReset);
     imageLayout->addLayout(sharpnessLayout);
+    imageLayout->addLayout(hueLayout);
 
     // White Balance
+    m_whiteBalanceGroupBox = new QGroupBox("White Balance", this);
+    QVBoxLayout *whiteBalanceLayout =
+        new QVBoxLayout(m_whiteBalanceGroupBox);
+    whiteBalanceLayout->setContentsMargins(16, 16, 16, 16);
+    whiteBalanceLayout->setSpacing(10);
     QHBoxLayout *wbLayout = new QHBoxLayout();
     wbLayout->addWidget(new QLabel("White Balance:", this));
     m_whiteBalanceComboBox = new QComboBox(this);
@@ -384,7 +397,7 @@ CameraSettingsWidget::CameraSettingsWidget(CameraController *controller, QWidget
     });
     wbLayout->addWidget(whiteBalanceReset);
     wbLayout->addStretch();
-    imageLayout->addLayout(wbLayout);
+    whiteBalanceLayout->addLayout(wbLayout);
 
     QHBoxLayout *wbKelvinLayout = new QHBoxLayout();
     wbKelvinLayout->setContentsMargins(20, 0, 0, 0);
@@ -400,13 +413,14 @@ CameraSettingsWidget::CameraSettingsWidget(CameraController *controller, QWidget
     m_whiteBalanceKelvinLabel = new QLabel("5000 K", this);
     m_whiteBalanceKelvinLabel->setEnabled(false);
     wbKelvinLayout->addWidget(m_whiteBalanceKelvinLabel);
-    imageLayout->addLayout(wbKelvinLayout);
+    whiteBalanceLayout->addLayout(wbKelvinLayout);
 
-    layout->addWidget(imageGroupBox);
+    layout->addWidget(m_whiteBalanceGroupBox);
+    layout->addWidget(m_imageGroupBox);
     layout->addStretch();
 }
 
-void CameraSettingsWidget::insertTopWidget(QWidget *widget)
+void CameraSettingsWidget::insertWidgetAt(int index, QWidget *widget)
 {
     if (!widget) return;
     if (QWidget *oldParent = widget->parentWidget()) {
@@ -414,7 +428,7 @@ void CameraSettingsWidget::insertTopWidget(QWidget *widget)
             oldLayout->removeWidget(widget);
     }
     if (auto *pageLayout = qobject_cast<QVBoxLayout*>(layout()))
-        pageLayout->insertWidget(0, widget);
+        pageLayout->insertWidget(index, widget);
 }
 
 void CameraSettingsWidget::onHDRToggled(bool checked)
@@ -442,7 +456,12 @@ void CameraSettingsWidget::onExposureAutoToggled(bool checked)
 {
     m_userInitiated = true;
     m_exposureComboBox->setEnabled(!checked);
-    m_controller->setExposure(m_exposureComboBox->currentData().toInt(), checked);
+    m_uvcExposureSlider->setEnabled(!checked);
+    if (m_controller->hasTiny4kCapabilities())
+        m_controller->setTiny4kAutoExposure(checked);
+    else
+        m_controller->setExposure(
+            m_exposureComboBox->currentData().toInt(), checked);
     m_commandTimer->start(1000);
 }
 
@@ -593,10 +612,10 @@ void CameraSettingsWidget::updateFromState(const CameraController::CameraState &
 
     const bool tiny4k = m_controller->hasTiny4kCapabilities();
     m_tiny4kDeviceGroup->setVisible(tiny4k);
-    // Tiny 4K firmware 1.2.6.2 boots in a camera-managed exposure mode that
-    // neither its SDK nor UVC menu can restore after switching to manual.
-    // Do not expose a one-way control that can leave the image overexposed.
-    m_exposureAutoCheckBox->setVisible(!tiny4k);
+    m_uvcExposureRow->setVisible(tiny4k);
+    m_gainRow->setVisible(tiny4k);
+    m_backlightRow->setVisible(tiny4k);
+    m_exposureAutoCheckBox->setVisible(true);
     m_exposureLabel->setVisible(!tiny4k);
     m_exposureComboBox->setVisible(!tiny4k);
 
@@ -637,6 +656,7 @@ void CameraSettingsWidget::updateFromState(const CameraController::CameraState &
         m_exposureAutoCheckBox->setChecked(state.exposureAuto);
         m_exposureAutoCheckBox->blockSignals(false);
         m_exposureComboBox->setEnabled(!state.exposureAuto);
+        m_uvcExposureSlider->setEnabled(!state.exposureAuto);
         int exposureIndex = m_exposureComboBox->findData(state.exposure);
         if (exposureIndex >= 0) {
             m_exposureComboBox->blockSignals(true);
@@ -795,6 +815,7 @@ void CameraSettingsWidget::updateWhiteBalanceControls(int mode)
 void CameraSettingsWidget::setV4l2Mode(bool v4l2Only)
 {
     m_advancedGroupBox->setVisible(!v4l2Only);
+    m_exposureGroupBox->setVisible(!v4l2Only);
     m_tiny4kDeviceGroup->setVisible(!v4l2Only && m_controller->hasTiny4kCapabilities());
 }
 

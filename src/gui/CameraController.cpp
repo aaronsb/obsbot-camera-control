@@ -840,6 +840,19 @@ bool CameraController::setTiny4kExposure(int value)
     return success;
 }
 
+bool CameraController::setTiny4kAutoExposure(bool automatic)
+{
+    if (!m_connected || !isTiny4k()) return false;
+    V4l2Backend backend;
+    if (!backend.open(m_device->videoDevPath())) return false;
+    bool success = backend.setAutoExposure(automatic);
+    if (success) {
+        m_currentState.exposureAuto = automatic;
+        emit stateChanged(m_currentState);
+    }
+    return success;
+}
+
 bool CameraController::setTiny4kGain(int value)
 {
     if (!m_connected || !isTiny4k()) return false;
@@ -1158,6 +1171,7 @@ void CameraController::updateState(bool includeImageControls)
     if (isTiny4k()) {
         V4l2Backend backend;
         if (backend.open(m_device->videoDevPath())) {
+            m_currentState.exposureAuto = backend.getAutoExposure();
             int value = backend.getExposureAbsolute();
             if (value >= 0) m_currentState.uvcExposure = value;
             value = backend.getGain();

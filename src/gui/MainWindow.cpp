@@ -416,8 +416,8 @@ void MainWindow::setupUI()
     m_ptzWidget->setCameraSettingsWidget(m_settingsWidget);
     m_trackingWidget->setPositionPresetsWidget(
         m_ptzWidget->positionPresetsGroup());
-    m_settingsWidget->insertTopWidget(m_trackingWidget->focusGroup());
-    m_settingsWidget->insertTopWidget(m_ptzWidget->imagePresetsGroup());
+    m_settingsWidget->insertWidgetAt(0, m_ptzWidget->imagePresetsGroup());
+    m_settingsWidget->insertWidgetAt(2, m_trackingWidget->focusGroup());
     connect(m_ptzWidget, &PTZControlWidget::presetUpdated,
             this, &MainWindow::onPresetUpdated);
     connect(m_trackingWidget, &TrackingControlWidget::invertControlsChanged,
@@ -443,6 +443,12 @@ void MainWindow::setupUI()
     };
     addScrollableTab(m_trackingWidget, tr("Console"));
     addScrollableTab(m_settingsWidget, tr("Image"));
+    QWidget *morePage = new QWidget(m_tabWidget);
+    QVBoxLayout *morePageLayout = new QVBoxLayout(morePage);
+    morePageLayout->setContentsMargins(8, 8, 8, 14);
+    morePageLayout->addWidget(m_settingsWidget->moreGroup());
+    morePageLayout->addStretch();
+    addScrollableTab(morePage, tr("More"));
     m_effectsWidget = new VideoEffectsWidget(this);
     connect(m_effectsWidget, &VideoEffectsWidget::effectsChanged,
             this, &MainWindow::onVideoEffectsChanged);

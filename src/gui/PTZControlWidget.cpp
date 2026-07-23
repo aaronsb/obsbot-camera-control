@@ -67,7 +67,7 @@ PTZControlWidget::PTZControlWidget(CameraController *controller, QWidget *parent
     layout->addWidget(m_positionPresetGroup);
 
     // Image Quality Presets section
-    m_imagePresetGroup = new QGroupBox("Image Quality Presets", this);
+    m_imagePresetGroup = new QGroupBox("Presets", this);
     QHBoxLayout *imagePresetLayout = new QHBoxLayout(m_imagePresetGroup);
     imagePresetLayout->setContentsMargins(16, 16, 16, 16);
     imagePresetLayout->setSpacing(8);

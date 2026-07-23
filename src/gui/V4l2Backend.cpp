@@ -166,6 +166,10 @@ bool V4l2Backend::setAutoExposure(bool automatic)
     return setControl(V4L2_CID_EXPOSURE_AUTO,
                       automatic ? V4L2_EXPOSURE_AUTO : V4L2_EXPOSURE_MANUAL);
 }
+bool V4l2Backend::getAutoExposure()
+{
+    return getControl(V4L2_CID_EXPOSURE_AUTO) == V4L2_EXPOSURE_AUTO;
+}
 
 bool V4l2Backend::setExposureAbsolute(int value) { return setControl(V4L2_CID_EXPOSURE_ABSOLUTE, value); }
 int V4l2Backend::getExposureAbsolute() { return getControl(V4L2_CID_EXPOSURE_ABSOLUTE); }

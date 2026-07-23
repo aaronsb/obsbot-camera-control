@@ -141,6 +141,7 @@ public:
     bool recallHardwarePreset(int id);
     bool setGimbalSpeed(double pitch, double pan);
     bool setTiny4kExposure(int value);
+    bool setTiny4kAutoExposure(bool automatic);
     bool setTiny4kGain(int value);
     bool setTiny4kBacklightCompensation(int value);
 

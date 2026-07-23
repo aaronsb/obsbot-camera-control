@@ -54,9 +54,8 @@ CameraSettingsWidget::CameraSettingsWidget(CameraController *controller, QWidget
     groupLayout->addWidget(m_faceFocusCheckBox);
 
     QHBoxLayout *exposureLayout = new QHBoxLayout();
-    m_exposureAutoCheckBox = new QCheckBox("Adaptive Exposure", this);
-    m_exposureAutoCheckBox->setToolTip(
-        "Use the Tiny 4K's supported shutter-priority mode to adapt gain to changing light");
+    m_exposureAutoCheckBox = new QCheckBox("Auto Exposure", this);
+    m_exposureAutoCheckBox->setToolTip("Continuously adapt exposure to changing light");
     connect(m_exposureAutoCheckBox, &QCheckBox::toggled,
             this, &CameraSettingsWidget::onExposureAutoToggled);
     exposureLayout->addWidget(m_exposureAutoCheckBox);
@@ -381,6 +380,12 @@ void CameraSettingsWidget::onWhiteBalanceKelvinChanged(int value)
 void CameraSettingsWidget::updateFromState(const CameraController::CameraState &state)
 {
     applyControlRanges();
+
+    const bool tiny4k = m_controller->hasTiny4kCapabilities();
+    m_exposureAutoCheckBox->setText(tiny4k ? "Adaptive Exposure" : "Auto Exposure");
+    m_exposureAutoCheckBox->setToolTip(tiny4k
+        ? "Use the Tiny 4K's supported shutter-priority mode to adapt gain to changing light"
+        : "Continuously adapt exposure to changing light");
 
     // Only update if state differs, not user-initiated, command timer expired, and not settling
     bool commandInFlight = m_commandTimer->isActive();

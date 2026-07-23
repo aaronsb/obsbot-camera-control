@@ -98,6 +98,7 @@ public:
     CameraState getCurrentState();
     bool hasTiny2Capabilities() const;
     bool hasOriginalTinyCapabilities() const { return isOriginalTinyFamily(); }
+    bool hasTiny4kCapabilities() const { return isTiny4k(); }
 
     // Tracking controls
     bool enableAutoFraming(bool enabled);
@@ -192,6 +193,7 @@ private:
     int m_fallbackWhiteBalanceMode;
     bool isTiny2Family() const;
     bool isOriginalTinyFamily() const;
+    bool isTiny4k() const;
     void tryV4l2Fallback();
     void connectV4l2(const std::string &devicePath);
     void refreshV4l2ControlRanges();

@@ -605,7 +605,7 @@ bool CameraController::setExposure(int shutterTime, bool automatic)
     if (!m_connected || m_v4l2Only) return false;
     int clamped = clampToRange(shutterTime, m_exposureRange, 9, 42);
 
-    if (isOriginalTinyFamily()) {
+    if (isTiny4k()) {
         V4l2Backend exposureBackend;
         if (!exposureBackend.open(m_device->videoDevPath()))
             return false;
@@ -911,7 +911,7 @@ void CameraController::updateState()
     if (m_device->cameraGetImageSharpR(sharpness) == 0)
         m_currentState.sharpness = clampToRange(sharpness, m_sharpnessRange, 0, 100);
 
-    if (isOriginalTinyFamily()) {
+    if (isTiny4k()) {
         V4l2Backend exposureBackend;
         if (exposureBackend.open(m_device->videoDevPath())) {
             int mode = exposureBackend.getControl(V4L2_CID_EXPOSURE_AUTO);
@@ -1104,6 +1104,11 @@ bool CameraController::isOriginalTinyFamily() const
 {
     return m_cameraInfo.productType == ObsbotProdTiny ||
            m_cameraInfo.productType == ObsbotProdTiny4k;
+}
+
+bool CameraController::isTiny4k() const
+{
+    return m_cameraInfo.productType == ObsbotProdTiny4k;
 }
 
 void CameraController::refreshControlRanges()

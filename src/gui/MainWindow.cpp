@@ -436,7 +436,12 @@ void MainWindow::setupUI()
     });
     QTimer::singleShot(0, this, &MainWindow::fitTabToCurrentPage);
 
-    QGroupBox *virtualCameraGroup = new QGroupBox(tr("Virtual Camera"), scrollContent);
+    QWidget *virtualCameraPage = new QWidget(m_tabWidget);
+    QVBoxLayout *virtualCameraPageLayout = new QVBoxLayout(virtualCameraPage);
+    virtualCameraPageLayout->setContentsMargins(8, 14, 8, 14);
+    virtualCameraPageLayout->setSpacing(14);
+
+    QGroupBox *virtualCameraGroup = new QGroupBox(tr("Virtual Camera"), virtualCameraPage);
     QVBoxLayout *virtualLayout = new QVBoxLayout(virtualCameraGroup);
     virtualLayout->setContentsMargins(16, 16, 16, 16);
     virtualLayout->setSpacing(10);
@@ -493,9 +498,16 @@ void MainWindow::setupUI()
     virtualResolutionHint->setWordWrap(true);
     virtualResolutionHint->setStyleSheet("color: palette(mid); font-size: 11px;");
     virtualLayout->addWidget(virtualResolutionHint);
-    scrollLayout->addWidget(virtualCameraGroup);
+    virtualCameraPageLayout->addWidget(virtualCameraGroup);
+    virtualCameraPageLayout->addStretch();
+    m_tabWidget->addTab(virtualCameraPage, tr("Virtual Camera"));
 
-    QGroupBox *snapshotGroup = new QGroupBox(tr("Snapshots"), scrollContent);
+    QWidget *settingsPage = new QWidget(m_tabWidget);
+    QVBoxLayout *settingsPageLayout = new QVBoxLayout(settingsPage);
+    settingsPageLayout->setContentsMargins(8, 14, 8, 14);
+    settingsPageLayout->setSpacing(14);
+
+    QGroupBox *snapshotGroup = new QGroupBox(tr("Snapshots"), settingsPage);
     QVBoxLayout *snapshotLayout = new QVBoxLayout(snapshotGroup);
     snapshotLayout->setContentsMargins(16, 16, 16, 16);
     snapshotLayout->setSpacing(10);
@@ -522,15 +534,18 @@ void MainWindow::setupUI()
     snapshotHint->setStyleSheet("color: palette(mid); font-size: 11px;");
     snapshotLayout->addWidget(snapshotHint);
 
-    scrollLayout->addWidget(snapshotGroup);
+    settingsPageLayout->addWidget(snapshotGroup);
 
-    scrollLayout->addStretch();
-
-    m_startMinimizedCheckbox = new QCheckBox(tr("Launch minimized / Close to tray"), scrollContent);
+    m_startMinimizedCheckbox = new QCheckBox(
+        tr("Launch minimized / Close to tray"), settingsPage);
     m_startMinimizedCheckbox->setObjectName("footerCheckbox");
     connect(m_startMinimizedCheckbox, &QCheckBox::toggled,
             this, &MainWindow::onStartMinimizedToggled);
-    scrollLayout->addWidget(m_startMinimizedCheckbox);
+    settingsPageLayout->addWidget(m_startMinimizedCheckbox);
+    settingsPageLayout->addStretch();
+    m_tabWidget->addTab(settingsPage, tr("Settings"));
+
+    scrollLayout->addStretch();
 
     m_statusLabel = new QLabel(tr("Status: Initializing..."), scrollContent);
     m_statusLabel->setObjectName("footerStatus");

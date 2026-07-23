@@ -418,7 +418,7 @@ void MainWindow::setupUI()
     m_tabWidget->setDocumentMode(true);
     m_tabWidget->addTab(m_trackingWidget, tr("Tracking"));
     m_tabWidget->addTab(m_ptzWidget, tr("Presets"));
-    m_tabWidget->addTab(m_settingsWidget, tr("Camera Image"));
+    m_tabWidget->addTab(m_settingsWidget, tr("Image"));
     m_effectsWidget = new VideoEffectsWidget(this);
     connect(m_effectsWidget, &VideoEffectsWidget::effectsChanged,
             this, &MainWindow::onVideoEffectsChanged);

@@ -946,7 +946,10 @@ void MainWindow::updateStatusBanner(bool connected)
     m_statusBanner->setProperty("state", connected ? "connected" : "disconnected");
     m_statusBanner->style()->unpolish(m_statusBanner);
     m_statusBanner->style()->polish(m_statusBanner);
+    m_statusChip->style()->unpolish(m_statusChip);
+    m_statusChip->style()->polish(m_statusChip);
     m_statusBanner->update();
+    m_statusChip->update();
 }
 
 void MainWindow::onTogglePreview(bool enabled)

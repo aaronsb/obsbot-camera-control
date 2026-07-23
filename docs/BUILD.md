@@ -25,6 +25,10 @@ cd obsbot-camera-control
 ./build.sh install --confirm
 ```
 
+On Arch/Manjaro, Debian/Ubuntu, and Fedora/RHEL derivatives, the confirmed
+install command detects and installs missing build dependencies before
+compiling. It invokes `sudo` only when required packages are missing.
+
 The build script automatically:
 - Checks all dependencies
 - Shows missing packages with install commands for your distro

@@ -60,6 +60,7 @@ show_usage() {
     echo -e "    Builds the project and installs binaries to your local bin directory."
     echo -e ""
     echo -e "    What it does:"
+    echo -e "    - Installs missing build dependencies on supported distributions"
     echo -e "    - Runs the build process (as above)"
     echo -e "    - Copies binaries to ${INSTALL_DIR}"
     echo -e "    - Makes them executable"
@@ -429,6 +430,44 @@ check_dependencies() {
     fi
 }
 
+# Install the complete build dependency set for supported distributions.
+# This is only called by the confirmed install command after the dependency
+# check fails; package managers safely ignore packages already installed.
+install_build_dependencies() {
+    local distro
+    distro=$(detect_distro)
+
+    print_msg "$YELLOW" "\nMissing build dependencies will now be installed."
+
+    case "$distro" in
+        arch|manjaro|endeavouros)
+            sudo pacman -S --needed cmake base-devel pkgconf qt6-base qt6-multimedia
+            ;;
+        debian|ubuntu|mint|pop)
+            sudo apt install -y \
+                cmake \
+                build-essential \
+                pkg-config \
+                qt6-base-dev \
+                qt6-multimedia-dev \
+                libqt6opengl6-dev
+            ;;
+        rhel|fedora|centos|rocky|almalinux)
+            sudo dnf group install -y "Development Tools"
+            sudo dnf install -y \
+                cmake \
+                pkgconfig \
+                qt6-qtbase-devel \
+                qt6-qtmultimedia-devel
+            ;;
+        *)
+            print_msg "$RED" "❌ Automatic dependency installation is not supported for this distribution."
+            print_msg "$YELLOW" "Install the packages listed above, then rerun this command."
+            return 1
+            ;;
+    esac
+}
+
 # Build the project
 do_build() {
     # Check dependencies first
@@ -478,6 +517,19 @@ do_build() {
 
 # Install the project
 do_install() {
+    # A confirmed install is a complete bootstrap on supported distributions.
+    # Check first so sudo/package managers are not invoked unnecessarily.
+    if ! check_dependencies; then
+        install_build_dependencies
+
+        echo ""
+        print_msg "$BLUE" "Verifying installed dependencies..."
+        if ! check_dependencies; then
+            print_msg "$RED" "❌ Dependencies are still incomplete after package installation."
+            return 1
+        fi
+    fi
+
     # Build first
     do_build
 
@@ -605,14 +657,15 @@ main() {
                 print_msg "$YELLOW" "⚠️  DRY RUN MODE - No changes will be made"
                 echo ""
                 print_msg "$NC" "This will:"
-                print_msg "$BLUE" "  1. Build the project (see: ./build.sh build)"
-                print_msg "$BLUE" "  2. Create $INSTALL_DIR if needed"
-                print_msg "$BLUE" "  3. Copy binaries to $INSTALL_DIR"
-                print_msg "$BLUE" "  4. Make binaries executable"
-                print_msg "$BLUE" "  5. Install desktop launcher to $DESKTOP_DIR"
-                print_msg "$BLUE" "  6. Install icon to $ICON_DIR"
-                print_msg "$BLUE" "  7. Check if $INSTALL_DIR is in PATH"
-                print_msg "$BLUE" "  8. Offer to add to PATH if needed (with your approval)"
+                print_msg "$BLUE" "  1. Install missing build dependencies on supported distributions"
+                print_msg "$BLUE" "  2. Build the project (see: ./build.sh build)"
+                print_msg "$BLUE" "  3. Create $INSTALL_DIR if needed"
+                print_msg "$BLUE" "  4. Copy binaries to $INSTALL_DIR"
+                print_msg "$BLUE" "  5. Make binaries executable"
+                print_msg "$BLUE" "  6. Install desktop launcher to $DESKTOP_DIR"
+                print_msg "$BLUE" "  7. Install icon to $ICON_DIR"
+                print_msg "$BLUE" "  8. Check if $INSTALL_DIR is in PATH"
+                print_msg "$BLUE" "  9. Offer to add to PATH if needed (with your approval)"
                 echo ""
                 print_msg "$YELLOW" "To actually install, run:"
                 print_msg "$GREEN" "  ./build.sh install --confirm"

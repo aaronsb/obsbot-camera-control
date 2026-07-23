@@ -117,7 +117,7 @@ cd obsbot-camera-control
 ```
 
 The build script automatically:
-- ✅ Checks dependencies (shows install commands for your distro)
+- ✅ Checks and installs missing build dependencies on supported distributions
 - ✅ Builds the application
 - ✅ Installs to `~/.local/bin`
 - ✅ Adds desktop launcher to your app menu

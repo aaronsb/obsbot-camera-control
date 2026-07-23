@@ -131,6 +131,10 @@ void PTZControlWidget::onRecallPreset()
         return;
     }
 
+    if (m_controller->hasTiny4kCapabilities()
+            && m_controller->recallHardwarePreset(index)) {
+        return;
+    }
     m_controller->setPanTilt(preset.pan, preset.tilt);
     m_controller->setZoom(preset.zoom);
 }
@@ -154,6 +158,9 @@ void PTZControlWidget::onStorePreset()
     preset.zoom = state.zoom;
     updatePresetLabel(index);
 
+    if (m_controller->hasTiny4kCapabilities()) {
+        m_controller->saveHardwarePreset(index);
+    }
     emit presetUpdated(index, preset.pan, preset.tilt, preset.zoom, true);
 }
 

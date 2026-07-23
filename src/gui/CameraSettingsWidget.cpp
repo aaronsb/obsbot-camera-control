@@ -218,22 +218,6 @@ CameraSettingsWidget::CameraSettingsWidget(CameraController *controller, QWidget
     addSpeedButton("→", 1, 2, 0.0, 45.0);
     deviceLayout->addLayout(speedLayout);
 
-    for (int id = 0; id < 3; ++id) {
-        QHBoxLayout *presetLayout = new QHBoxLayout();
-        presetLayout->addWidget(new QLabel(QString("Camera Preset %1").arg(id + 1), this));
-        QPushButton *savePreset = new QPushButton("Save", this);
-        connect(savePreset, &QPushButton::clicked, this, [this, id]() {
-            m_controller->saveHardwarePreset(id);
-        });
-        presetLayout->addWidget(savePreset);
-        QPushButton *recallPreset = new QPushButton("Recall", this);
-        connect(recallPreset, &QPushButton::clicked, this, [this, id]() {
-            m_controller->recallHardwarePreset(id);
-        });
-        presetLayout->addWidget(recallPreset);
-        deviceLayout->addLayout(presetLayout);
-    }
-
     QHBoxLayout *dangerLayout = new QHBoxLayout();
     QPushButton *verticalMode = new QPushButton("Enable Portrait Mode…", this);
     connect(verticalMode, &QPushButton::clicked, this, [this]() {

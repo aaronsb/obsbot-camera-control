@@ -342,7 +342,7 @@ void MainWindow::setupUI()
     QVBoxLayout *statusTextLayout = new QVBoxLayout();
     statusTextLayout->setContentsMargins(0, 0, 0, 0);
     statusTextLayout->setSpacing(6);
-    m_statusChip = new QLabel(tr("Camera • Offline"), m_statusBanner);
+    m_statusChip = new QLabel(tr("Offline"), m_statusBanner);
     m_statusChip->setObjectName("statusChip");
     statusTextLayout->addWidget(m_statusChip);
 
@@ -948,7 +948,7 @@ void MainWindow::updatePreviewControls()
 void MainWindow::updateStatusBanner(bool connected)
 {
     m_statusBanner->setProperty("state", connected ? "connected" : "disconnected");
-    m_statusChip->setText(connected ? tr("Camera • Online") : tr("Camera • Offline"));
+    m_statusChip->setText(connected ? tr("Online") : tr("Offline"));
     m_statusBanner->style()->unpolish(m_statusBanner);
     m_statusBanner->style()->polish(m_statusBanner);
     m_statusBanner->update();

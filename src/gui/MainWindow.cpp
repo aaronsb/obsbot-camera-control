@@ -344,7 +344,8 @@ void MainWindow::setupUI()
     statusTextLayout->setSpacing(6);
     m_statusChip = new QLabel(tr("Offline"), m_statusBanner);
     m_statusChip->setObjectName("statusChip");
-    statusTextLayout->addWidget(m_statusChip);
+    m_statusChip->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Preferred);
+    statusTextLayout->addWidget(m_statusChip, 0, Qt::AlignLeft);
 
     m_deviceInfoLabel = new QLabel(tr("Connecting to camera..."), m_statusBanner);
     m_deviceInfoLabel->setObjectName("deviceInfoLabel");

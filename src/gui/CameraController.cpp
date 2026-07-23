@@ -512,6 +512,8 @@ bool CameraController::setZoom(double zoom)
 
     if (success) {
         m_currentState.zoom = zoom;
+        if (!m_v4l2Only && isOriginalTinyFamily())
+            m_currentState.fovMode = Device::FovTypeNull;
         emit stateChanged(m_currentState);
     }
 
@@ -565,6 +567,12 @@ bool CameraController::setFOV(int fovMode)
     });
     if (success) {
         m_currentState.fovMode = fovMode;
+        float zoom = m_currentState.zoom;
+        if (m_device->cameraGetZoomAbsoluteR(zoom) == 0
+                && zoom >= 1.0f && zoom <= 2.0f) {
+            m_currentState.zoom = zoom;
+            m_currentState.zoomRatio = qRound(zoom * 100.0f);
+        }
         emit stateChanged(m_currentState);
     }
     return success;
@@ -1075,7 +1083,7 @@ void CameraController::updateState()
     m_currentState.autoFocusEnabled = status.tiny.auto_focus;
     m_currentState.manualFocusValue = status.tiny.manual_focus_value;
     if (status.tiny.fov >= Device::FovType86
-            && status.tiny.fov <= Device::FovType65) {
+            && status.tiny.fov <= Device::FovTypeNull) {
         m_currentState.fovMode = status.tiny.fov;
     }
     m_currentState.devStatus = status.tiny.dev_status;
@@ -1279,7 +1287,10 @@ void CameraController::saveCurrentStateToConfig()
     // Update only camera-related settings from current state
     settings.faceTracking = m_currentState.autoFramingEnabled;
     settings.hdr = m_currentState.hdrEnabled;
-    settings.fov = m_currentState.fovMode;
+    if (m_currentState.fovMode >= Device::FovType86
+            && m_currentState.fovMode <= Device::FovType65) {
+        settings.fov = m_currentState.fovMode;
+    }
     settings.faceAE = m_currentState.faceAEEnabled;
     settings.faceFocus = m_currentState.faceFocusEnabled;
     settings.zoom = qBound(1.0, m_currentState.zoom, 2.0);

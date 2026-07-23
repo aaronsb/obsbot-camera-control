@@ -34,14 +34,19 @@ CameraSettingsWidget::CameraSettingsWidget(CameraController *controller, QWidget
     connect(m_hdrCheckBox, &QCheckBox::toggled, this, &CameraSettingsWidget::onHDRToggled);
     groupLayout->addWidget(m_hdrCheckBox);
 
-    // FOV
+    // Named zoom/FOV presets
     QHBoxLayout *fovLayout = new QHBoxLayout();
-    fovLayout->addWidget(new QLabel("Field of View:", this));
+    fovLayout->addWidget(new QLabel("Zoom preset:", this));
     m_fovComboBox = new QComboBox(this);
     m_fovComboBox->addItem("Wide (86°)", 0);
     m_fovComboBox->addItem("Medium (78°)", 1);
     m_fovComboBox->addItem("Narrow (65°)", 2);
-    m_fovComboBox->setToolTip("Change the camera's field of view");
+    m_fovComboBox->addItem("Custom", Device::FovTypeNull);
+    if (auto *model = qobject_cast<QStandardItemModel*>(m_fovComboBox->model())) {
+        model->item(3)->setEnabled(false);
+    }
+    m_fovComboBox->setToolTip(
+        "Select a named field-of-view preset; manual zoom is shown as Custom");
     connect(m_fovComboBox, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, &CameraSettingsWidget::onFOVChanged);
     fovLayout->addWidget(m_fovComboBox);

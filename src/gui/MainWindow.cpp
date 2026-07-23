@@ -368,7 +368,13 @@ void MainWindow::setupUI()
         m_controller->disconnectFromCamera();
         m_deviceInfoLabel->setText(tr("Connecting to camera..."));
         m_statusLabel->setText(tr("Status: Connecting..."));
-        m_controller->connectToCamera();
+        updateStatusBanner(false);
+        // Let Qt paint the connecting state before SDK discovery starts. If
+        // the SDK already has the camera cached, connectToCamera() can emit
+        // cameraConnected synchronously and otherwise skip this visible state.
+        QTimer::singleShot(100, this, [this]() {
+            m_controller->connectToCamera();
+        });
     });
     actionLayout->addWidget(m_reconnectButton);
     statusMainLayout->addWidget(actionRow, 0, Qt::AlignVCenter);

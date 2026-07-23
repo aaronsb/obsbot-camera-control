@@ -1313,6 +1313,7 @@ void MainWindow::loadConfiguration()
         const auto &preset = settings.presets[static_cast<size_t>(i)];
         presetStates[static_cast<size_t>(i)] = {
             preset.defined,
+            QString::fromStdString(preset.name),
             preset.pan,
             preset.tilt,
             preset.zoom
@@ -1577,7 +1578,8 @@ void MainWindow::onPreviewFormatChanged(const QString &formatId)
     updateVirtualCameraStreamerState();
 }
 
-void MainWindow::onPresetUpdated(int index, double pan, double tilt, double zoom, bool defined)
+void MainWindow::onPresetUpdated(int index, double pan, double tilt, double zoom,
+                                 bool defined, const QString &name)
 {
     auto settings = m_controller->getConfig().getSettings();
     if (index < 0 || index >= static_cast<int>(settings.presets.size())) {
@@ -1586,6 +1588,7 @@ void MainWindow::onPresetUpdated(int index, double pan, double tilt, double zoom
 
     auto &preset = settings.presets[static_cast<size_t>(index)];
     preset.defined = defined;
+    preset.name = name.toStdString();
     preset.pan = pan;
     preset.tilt = tilt;
     preset.zoom = zoom;

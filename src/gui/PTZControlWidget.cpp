@@ -2,6 +2,7 @@
 #include "CameraSettingsWidget.h"
 #include <QVBoxLayout>
 #include <QHBoxLayout>
+#include <QMenu>
 
 PTZControlWidget::PTZControlWidget(CameraController *controller, QWidget *parent)
     : QWidget(parent)
@@ -14,41 +15,51 @@ PTZControlWidget::PTZControlWidget(CameraController *controller, QWidget *parent
     layout->setSpacing(14);
 
     // Presets section
-    m_positionPresetGroup = new QGroupBox("Position Presets", this);
-    QVBoxLayout *presetLayout = new QVBoxLayout(m_positionPresetGroup);
+    m_positionPresetGroup = new QGroupBox("Presets", this);
+    QHBoxLayout *presetLayout = new QHBoxLayout(m_positionPresetGroup);
     presetLayout->setContentsMargins(16, 16, 16, 16);
     presetLayout->setSpacing(8);
 
     for (int i = 0; i < 3; ++i) {
         PresetUi presetUi{};
         presetUi.defined = false;
+        presetUi.name = QString::number(i + 1);
         presetUi.pan = 0.0;
         presetUi.tilt = 0.0;
         presetUi.zoom = 1.0;
 
-        QHBoxLayout *row = new QHBoxLayout();
-        row->setSpacing(8);
-        QLabel *titleLabel = new QLabel(QString("Preset %1").arg(i + 1), this);
-        titleLabel->setStyleSheet("font-weight: 600; font-size: 11px;");
-        row->addWidget(titleLabel);
-
-        presetUi.statusLabel = new QLabel("Empty", this);
-        presetUi.statusLabel->setStyleSheet("color: palette(mid); font-size: 11px;");
-        row->addWidget(presetUi.statusLabel, 1);
-
-        presetUi.recallButton = new QPushButton("Recall", this);
+        presetUi.stack = new QStackedWidget(m_positionPresetGroup);
+        presetUi.recallButton = new QPushButton(presetUi.name, presetUi.stack);
         presetUi.recallButton->setProperty("presetIndex", i);
-        presetUi.recallButton->setEnabled(false);
+        presetUi.recallButton->setContextMenuPolicy(Qt::CustomContextMenu);
         connect(presetUi.recallButton, &QPushButton::clicked, this, &PTZControlWidget::onRecallPreset);
-        row->addWidget(presetUi.recallButton);
-
-        presetUi.saveButton = new QPushButton("Save", this);
-        presetUi.saveButton->setProperty("presetIndex", i);
-        connect(presetUi.saveButton, &QPushButton::clicked, this, &PTZControlWidget::onStorePreset);
-        row->addWidget(presetUi.saveButton);
-
-        presetLayout->addLayout(row);
+        connect(presetUi.recallButton, &QPushButton::customContextMenuRequested,
+                this, &PTZControlWidget::showPresetMenu);
+        presetUi.renameEditor = new QLineEdit(presetUi.stack);
+        presetUi.renameEditor->setAlignment(Qt::AlignCenter);
+        presetUi.renameEditor->setMaxLength(32);
+        presetUi.renameEditor->setProperty("presetIndex", i);
+        presetUi.stack->addWidget(presetUi.recallButton);
+        presetUi.stack->addWidget(presetUi.renameEditor);
+        presetLayout->addWidget(presetUi.stack, 1);
         m_presets[static_cast<size_t>(i)] = presetUi;
+        connect(presetUi.renameEditor, &QLineEdit::editingFinished,
+                this, [this, i]() {
+            auto &preset = m_presets[static_cast<size_t>(i)];
+            if (preset.stack->currentWidget() != preset.renameEditor) {
+                return;
+            }
+            QString name = preset.renameEditor->text().trimmed();
+            if (!name.isEmpty()) {
+                name.replace('\n', ' ');
+                name.replace('\r', ' ');
+                preset.name = name;
+            }
+            preset.stack->setCurrentWidget(preset.recallButton);
+            updatePresetLabel(i);
+            emit presetUpdated(i, preset.pan, preset.tilt, preset.zoom,
+                               preset.defined, preset.name);
+        });
         updatePresetLabel(i);
     }
 
@@ -99,6 +110,8 @@ void PTZControlWidget::applyPresetStates(const std::array<PresetState, 3> &prese
         auto &ui = m_presets[static_cast<size_t>(i)];
         const auto &preset = presets[static_cast<size_t>(i)];
         ui.defined = preset.defined;
+        ui.name = preset.name.trimmed().isEmpty()
+            ? QString::number(i + 1) : preset.name;
         ui.pan = preset.pan;
         ui.tilt = preset.tilt;
         ui.zoom = preset.zoom;
@@ -111,7 +124,9 @@ std::array<PTZControlWidget::PresetState, 3> PTZControlWidget::currentPresets() 
     std::array<PresetState, 3> out{};
     for (int i = 0; i < 3; ++i) {
         const auto &ui = m_presets[static_cast<size_t>(i)];
-        out[static_cast<size_t>(i)] = {ui.defined, ui.pan, ui.tilt, ui.zoom};
+        out[static_cast<size_t>(i)] = {
+            ui.defined, ui.name, ui.pan, ui.tilt, ui.zoom
+        };
     }
     return out;
 }
@@ -140,13 +155,8 @@ void PTZControlWidget::onRecallPreset()
     m_controller->setZoom(preset.zoom);
 }
 
-void PTZControlWidget::onStorePreset()
+void PTZControlWidget::storePreset(int index)
 {
-    auto *button = qobject_cast<QPushButton*>(sender());
-    if (!button) {
-        return;
-    }
-    int index = button->property("presetIndex").toInt();
     if (index < 0 || index >= static_cast<int>(m_presets.size())) {
         return;
     }
@@ -162,7 +172,67 @@ void PTZControlWidget::onStorePreset()
     if (m_controller->hasTiny4kCapabilities()) {
         m_controller->saveHardwarePreset(index);
     }
-    emit presetUpdated(index, preset.pan, preset.tilt, preset.zoom, true);
+    emit presetUpdated(index, preset.pan, preset.tilt, preset.zoom,
+                       true, preset.name);
+}
+
+void PTZControlWidget::deletePreset(int index)
+{
+    if (index < 0 || index >= static_cast<int>(m_presets.size())) {
+        return;
+    }
+    auto &preset = m_presets[static_cast<size_t>(index)];
+    preset.defined = false;
+    preset.name = QString::number(index + 1);
+    updatePresetLabel(index);
+    emit presetUpdated(index, preset.pan, preset.tilt, preset.zoom,
+                       false, preset.name);
+}
+
+void PTZControlWidget::beginPresetRename(int index)
+{
+    if (index < 0 || index >= static_cast<int>(m_presets.size())) {
+        return;
+    }
+    auto &preset = m_presets[static_cast<size_t>(index)];
+    preset.renameEditor->setText(preset.name);
+    preset.stack->setCurrentWidget(preset.renameEditor);
+    preset.renameEditor->setFocus();
+    preset.renameEditor->selectAll();
+}
+
+void PTZControlWidget::showPresetMenu(const QPoint &position)
+{
+    auto *button = qobject_cast<QPushButton*>(sender());
+    if (!button) {
+        return;
+    }
+    const int index = button->property("presetIndex").toInt();
+    if (index < 0 || index >= static_cast<int>(m_presets.size())) {
+        return;
+    }
+
+    const auto &preset = m_presets[static_cast<size_t>(index)];
+    QMenu menu(this);
+    if (!preset.defined) {
+        QAction *setAction = menu.addAction("Set");
+        if (menu.exec(button->mapToGlobal(position)) == setAction) {
+            storePreset(index);
+        }
+        return;
+    }
+
+    QAction *updateAction = menu.addAction("Update");
+    QAction *deleteAction = menu.addAction("Delete");
+    QAction *renameAction = menu.addAction("Rename");
+    QAction *selected = menu.exec(button->mapToGlobal(position));
+    if (selected == updateAction) {
+        storePreset(index);
+    } else if (selected == deleteAction) {
+        deletePreset(index);
+    } else if (selected == renameAction) {
+        beginPresetRename(index);
+    }
 }
 
 void PTZControlWidget::updatePresetLabel(int index)
@@ -171,23 +241,21 @@ void PTZControlWidget::updatePresetLabel(int index)
         return;
     }
     auto &preset = m_presets[static_cast<size_t>(index)];
-    if (!preset.statusLabel) {
+    if (!preset.recallButton) {
         return;
     }
 
-    if (preset.defined) {
-        preset.statusLabel->setText(
-            QString("Pan %1, Tilt %2, Zoom %3x")
-                .arg(preset.pan, 0, 'f', 2)
-                .arg(preset.tilt, 0, 'f', 2)
-                .arg(preset.zoom, 0, 'f', 1));
-    } else {
-        preset.statusLabel->setText("Empty");
-    }
-
-    if (preset.recallButton) {
-        preset.recallButton->setEnabled(preset.defined);
-    }
+    preset.recallButton->setText(preset.name);
+    preset.recallButton->setStyleSheet(
+        preset.defined
+            ? QString()
+            : QString("color: palette(mid); background-color: palette(midlight);"));
+    preset.recallButton->setToolTip(preset.defined
+        ? QString("Pan %1, Tilt %2, Zoom %3x")
+              .arg(preset.pan, 0, 'f', 2)
+              .arg(preset.tilt, 0, 'f', 2)
+              .arg(preset.zoom, 0, 'f', 2)
+        : QString("Empty preset"));
 }
 
 void PTZControlWidget::onStoreImagePreset()

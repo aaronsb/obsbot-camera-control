@@ -33,6 +33,7 @@ public:
     struct CameraSettings {
         struct PresetSlot {
             bool defined;
+            std::string name;
             double pan;
             double tilt;
             double zoom;

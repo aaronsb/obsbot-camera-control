@@ -58,6 +58,7 @@ void Config::setDefaults()
 
     for (auto &preset : m_settings.presets) {
         preset.defined = false;
+        preset.name.clear();
         preset.pan = 0.0;
         preset.tilt = 0.0;
         preset.zoom = 1.0;
@@ -218,6 +219,7 @@ bool Config::load(std::vector<ValidationError> &errors)
         const std::string suffix = key.substr(8);
         static const std::unordered_set<std::string> presetSuffixes = {
             "defined",
+            "name",
             "pan",
             "tilt",
             "zoom"
@@ -283,6 +285,9 @@ bool Config::parseLine(const std::string &line, int lineNumber, std::vector<Vali
                     addError(InvalidValue, base + "defined must be true/false or enabled/disabled");
                     return false;
                 }
+                return true;
+            } else if (suffix == "name") {
+                preset.name = value;
                 return true;
             } else if (suffix == "pan") {
                 try {
@@ -857,6 +862,7 @@ bool Config::save()
         const auto &preset = m_settings.presets[i];
         file << "# PTZ Preset " << (i + 1) << "\n";
         file << "preset" << (i + 1) << "_defined=" << (preset.defined ? "enabled" : "disabled") << "\n";
+        file << "preset" << (i + 1) << "_name=" << preset.name << "\n";
         file << "preset" << (i + 1) << "_pan=" << preset.pan << "\n";
         file << "preset" << (i + 1) << "_tilt=" << preset.tilt << "\n";
         file << "preset" << (i + 1) << "_zoom=" << preset.zoom << "\n\n";

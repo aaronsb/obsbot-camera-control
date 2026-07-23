@@ -305,11 +305,10 @@ void TrackingControlWidget::updateFromState(const CameraController::CameraState 
         updatePTZControlsState();
     }
 
-    bool tiny2 = m_controller->hasTiny2Capabilities();
-    if (tiny2 != m_tiny2Capabilities) {
-        m_tiny2Capabilities = tiny2;
-        updateTiny2Visibility();
-    }
+    // Connection capabilities are unknown when this widget is constructed.
+    // Refresh both Tiny2 and original-Tiny containers after every state
+    // update so a late SDK connection can reveal the correct controls.
+    updateTiny2Visibility();
 
     if (m_tiny2Capabilities && !m_userInitiated && !commandInFlight && !isSettling) {
         int modeIdx = m_modeCombo->findData(state.aiMode);

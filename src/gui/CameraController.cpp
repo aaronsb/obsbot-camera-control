@@ -14,6 +14,11 @@ CameraController::CameraController(QObject *parent)
     m_cachedState = {};
     m_currentState.whiteBalanceKelvin = 5000;
     m_cachedState.whiteBalanceKelvin = 5000;
+    m_currentState.exposureAuto = m_cachedState.exposureAuto = true;
+    m_currentState.exposure = m_cachedState.exposure = 33;
+    m_currentState.antiFlicker = m_cachedState.antiFlicker = Device::PowerLineFreq50;
+    m_currentState.hue = m_cachedState.hue = 50;
+    m_currentState.sharpness = m_cachedState.sharpness = 50;
     m_lastRequestedWhiteBalance = static_cast<int>(Device::DevWhiteBalanceAuto);
     m_whiteBalanceFallbackActive = false;
     m_fallbackWhiteBalanceMode = static_cast<int>(Device::DevWhiteBalanceAuto);
@@ -570,6 +575,47 @@ bool CameraController::setFocusAbsolute(int position, bool autoFocus)
     return success;
 }
 
+bool CameraController::setTrackingStyle(int style)
+{
+    if (!m_connected || m_v4l2Only || !isOriginalTinyFamily()) return false;
+    style = qBound(static_cast<int>(Device::AiVTrackStandard), style,
+                   static_cast<int>(Device::AiVTrackMotion));
+    bool success = executeCommand("Set tracking style", [this, style]() {
+        return m_device->aiSetTrackingModeR(static_cast<Device::AiVerticalTrackType>(style));
+    });
+    if (success)
+        m_currentState.trackingStyle = style;
+    return success;
+}
+
+bool CameraController::setExposure(int shutterTime, bool automatic)
+{
+    if (!m_connected || m_v4l2Only) return false;
+    int clamped = clampToRange(shutterTime, m_exposureRange, 9, 42);
+    bool success = executeCommand(automatic ? "Enable auto exposure" : "Set exposure",
+                                  [this, clamped, automatic]() {
+        return m_device->cameraSetExposureAbsolute(clamped, automatic);
+    });
+    if (success) {
+        m_currentState.exposureAuto = automatic;
+        m_currentState.exposure = clamped;
+        emit stateChanged(m_currentState);
+    }
+    return success;
+}
+
+bool CameraController::setAntiFlicker(int frequency)
+{
+    if (!m_connected || m_v4l2Only) return false;
+    int clamped = clampToRange(frequency, m_antiFlickerRange, 0, 3);
+    bool success = executeCommand("Set anti-flicker", [this, clamped]() {
+        return m_device->cameraSetAntiFlickR(clamped);
+    });
+    if (success)
+        m_currentState.antiFlicker = clamped;
+    return success;
+}
+
 bool CameraController::setBrightness(int value)
 {
     if (!m_connected) return false;
@@ -630,6 +676,30 @@ bool CameraController::setSaturation(int value)
         m_currentState.saturation = clamped;
         emit stateChanged(m_currentState);
     }
+    return success;
+}
+
+bool CameraController::setHue(int value)
+{
+    if (!m_connected || m_v4l2Only) return false;
+    int clamped = clampToRange(value, m_hueRange, 0, 100);
+    bool success = executeCommand("Set Hue", [this, clamped]() {
+        return m_device->cameraSetImageHueR(clamped);
+    });
+    if (success)
+        m_currentState.hue = clamped;
+    return success;
+}
+
+bool CameraController::setSharpness(int value)
+{
+    if (!m_connected || m_v4l2Only) return false;
+    int clamped = clampToRange(value, m_sharpnessRange, 0, 100);
+    bool success = executeCommand("Set Sharpness", [this, clamped]() {
+        return m_device->cameraSetImageSharpR(clamped);
+    });
+    if (success)
+        m_currentState.sharpness = clamped;
     return success;
 }
 
@@ -795,7 +865,7 @@ void CameraController::updateState()
     bool preservedContrastAuto = m_currentState.contrastAuto;
     bool preservedSaturationAuto = m_currentState.saturationAuto;
 
-    int32_t brightness, contrast, saturation;
+    int32_t brightness, contrast, saturation, hue, sharpness;
     Device::DevWhiteBalanceType wbType;
     int32_t wbParam;
 
@@ -808,6 +878,20 @@ void CameraController::updateState()
     if (m_device->cameraGetImageSaturationR(saturation) == 0) {
         m_currentState.saturation = clampToRange(saturation, m_saturationRange, 0, 255);
     }
+    if (m_device->cameraGetImageHueR(hue) == 0)
+        m_currentState.hue = clampToRange(hue, m_hueRange, 0, 100);
+    if (m_device->cameraGetImageSharpR(sharpness) == 0)
+        m_currentState.sharpness = clampToRange(sharpness, m_sharpnessRange, 0, 100);
+
+    int32_t exposure = m_currentState.exposure;
+    bool exposureAuto = m_currentState.exposureAuto;
+    if (m_device->cameraGetExposureAbsolute(exposure, exposureAuto) == 0) {
+        m_currentState.exposure = clampToRange(exposure, m_exposureRange, 9, 42);
+        m_currentState.exposureAuto = exposureAuto;
+    }
+    int32_t antiFlicker = m_currentState.antiFlicker;
+    if (m_device->cameraGetAntiFlickR(antiFlicker) == 0)
+        m_currentState.antiFlicker = antiFlicker;
     if (m_device->cameraGetWhiteBalanceR(wbType, wbParam) == 0) {
         m_currentState.whiteBalance = static_cast<int>(wbType);
         if (wbType == Device::DevWhiteBalanceManual) {
@@ -1006,6 +1090,10 @@ void CameraController::refreshControlRanges()
     fetchRange(&Device::cameraGetRangeImageBrightnessR, m_brightnessRange);
     fetchRange(&Device::cameraGetRangeImageContrastR, m_contrastRange);
     fetchRange(&Device::cameraGetRangeImageSaturationR, m_saturationRange);
+    fetchRange(&Device::cameraGetRangeImageHueR, m_hueRange);
+    fetchRange(&Device::cameraGetRangeImageSharpR, m_sharpnessRange);
+    fetchRange(&Device::cameraGetRangeExposureAbsolute, m_exposureRange);
+    fetchRange(&Device::cameraGetRangeAntiFlickR, m_antiFlickerRange);
     fetchRange(&Device::cameraGetRangeWhiteBalanceR, m_whiteBalanceKelvinRange);
 
     m_supportedWhiteBalanceTypes.clear();
@@ -1032,6 +1120,10 @@ void CameraController::resetControlRanges()
     m_brightnessRange = {};
     m_contrastRange = {};
     m_saturationRange = {};
+    m_hueRange = {};
+    m_sharpnessRange = {};
+    m_exposureRange = {};
+    m_antiFlickerRange = {};
     m_whiteBalanceKelvinRange = {};
     m_supportedWhiteBalanceTypes.clear();
     m_whiteBalanceFallbackActive = false;

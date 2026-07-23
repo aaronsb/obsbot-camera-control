@@ -34,6 +34,19 @@ TrackingControlWidget::TrackingControlWidget(CameraController *controller, QWidg
     connect(m_trackingCheckBox, &QCheckBox::toggled, this, &TrackingControlWidget::onTrackingToggled);
     groupLayout->addWidget(m_trackingCheckBox);
 
+    m_originalTinyContainer = new QWidget(this);
+    QHBoxLayout *originalTinyLayout = new QHBoxLayout(m_originalTinyContainer);
+    originalTinyLayout->setContentsMargins(0, 8, 0, 0);
+    originalTinyLayout->addWidget(new QLabel("Tracking Style", this));
+    m_trackingStyleCombo = new QComboBox(this);
+    m_trackingStyleCombo->addItem("Standard", Device::AiVTrackStandard);
+    m_trackingStyleCombo->addItem("Headroom", Device::AiVTrackHeadroom);
+    m_trackingStyleCombo->addItem("Motion", Device::AiVTrackMotion);
+    connect(m_trackingStyleCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, &TrackingControlWidget::onTrackingStyleChanged);
+    originalTinyLayout->addWidget(m_trackingStyleCombo, 1);
+    groupLayout->addWidget(m_originalTinyContainer);
+
     // Advanced controls container (Tiny 2 family)
     m_advancedContainer = new QWidget(this);
     QVBoxLayout *advancedLayout = new QVBoxLayout(m_advancedContainer);
@@ -282,6 +295,13 @@ void TrackingControlWidget::updateFromState(const CameraController::CameraState 
     bool commandInFlight = m_commandTimer->isActive();
     bool isSettling = m_controller->isSettling();
 
+    int trackingStyleIndex = m_trackingStyleCombo->findData(state.trackingStyle);
+    if (trackingStyleIndex >= 0 && !m_userInitiated && !commandInFlight && !isSettling) {
+        m_trackingStyleCombo->blockSignals(true);
+        m_trackingStyleCombo->setCurrentIndex(trackingStyleIndex);
+        m_trackingStyleCombo->blockSignals(false);
+    }
+
     if (m_trackingCheckBox->isChecked() != shouldBeChecked && !m_userInitiated && !commandInFlight && !isSettling) {
         m_trackingCheckBox->blockSignals(true);
         m_trackingCheckBox->setChecked(shouldBeChecked);
@@ -444,6 +464,14 @@ void TrackingControlWidget::onAudioGainToggled(bool checked)
     m_commandTimer->start(1000);
 }
 
+void TrackingControlWidget::onTrackingStyleChanged(int index)
+{
+    if (index < 0 || !m_controller->hasOriginalTinyCapabilities()) return;
+    m_userInitiated = true;
+    m_controller->setTrackingStyle(m_trackingStyleCombo->itemData(index).toInt());
+    m_commandTimer->start(1000);
+}
+
 void TrackingControlWidget::updateTiny2Visibility()
 {
     if (!m_advancedContainer) {
@@ -455,6 +483,7 @@ void TrackingControlWidget::updateTiny2Visibility()
     m_tiny2Capabilities = m_controller->hasTiny2Capabilities();
 
     m_advancedContainer->setVisible(m_tiny2Capabilities);
+    m_originalTinyContainer->setVisible(m_controller->hasOriginalTinyCapabilities());
     m_humanSubModeCombo->setEnabled(m_tiny2Capabilities && m_modeCombo->currentData().toInt() == Device::AiWorkModeHuman);
 }
 

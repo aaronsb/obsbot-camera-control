@@ -53,6 +53,43 @@ CameraSettingsWidget::CameraSettingsWidget(CameraController *controller, QWidget
     connect(m_faceFocusCheckBox, &QCheckBox::toggled, this, &CameraSettingsWidget::onFaceFocusToggled);
     groupLayout->addWidget(m_faceFocusCheckBox);
 
+    QHBoxLayout *exposureLayout = new QHBoxLayout();
+    m_exposureAutoCheckBox = new QCheckBox("Auto Exposure", this);
+    m_exposureAutoCheckBox->setToolTip("Continuously adapt exposure to changing light");
+    connect(m_exposureAutoCheckBox, &QCheckBox::toggled,
+            this, &CameraSettingsWidget::onExposureAutoToggled);
+    exposureLayout->addWidget(m_exposureAutoCheckBox);
+    m_exposureComboBox = new QComboBox(this);
+    static const char *shutterNames[] = {
+        "1/8000", "1/6400", "1/5000", "1/4000", "1/3200", "1/2500",
+        "1/2000", "1/1600", "1/1250", "1/1000", "1/800", "1/640",
+        "1/500", "1/400", "1/320", "1/240", "1/200", "1/160",
+        "1/120", "1/100", "1/80", "1/60", "1/50", "1/40", "1/30",
+        "1/25", "1/20", "1/15", "1/12.5", "1/10", "1/8", "1/6.25",
+        "1/5", "1/4"
+    };
+    for (int i = 0; i < 34; ++i)
+        m_exposureComboBox->addItem(shutterNames[i], 9 + i);
+    connect(m_exposureComboBox, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, &CameraSettingsWidget::onExposureChanged);
+    exposureLayout->addWidget(new QLabel("Shutter:", this));
+    exposureLayout->addWidget(m_exposureComboBox);
+    exposureLayout->addStretch();
+    groupLayout->addLayout(exposureLayout);
+
+    QHBoxLayout *antiFlickerLayout = new QHBoxLayout();
+    antiFlickerLayout->addWidget(new QLabel("Anti-flicker:", this));
+    m_antiFlickerComboBox = new QComboBox(this);
+    m_antiFlickerComboBox->addItem("Off", Device::PowerLineFreqOff);
+    m_antiFlickerComboBox->addItem("50 Hz", Device::PowerLineFreq50);
+    m_antiFlickerComboBox->addItem("60 Hz", Device::PowerLineFreq60);
+    m_antiFlickerComboBox->addItem("Auto", Device::PowerLineFreqAuto);
+    connect(m_antiFlickerComboBox, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, &CameraSettingsWidget::onAntiFlickerChanged);
+    antiFlickerLayout->addWidget(m_antiFlickerComboBox);
+    antiFlickerLayout->addStretch();
+    groupLayout->addLayout(antiFlickerLayout);
+
     layout->addWidget(m_advancedGroupBox);
 
     // Image Controls Group
@@ -64,6 +101,7 @@ CameraSettingsWidget::CameraSettingsWidget(CameraController *controller, QWidget
     // Brightness
     QHBoxLayout *brightnessLayout = new QHBoxLayout();
     m_brightnessAutoCheckBox = new QCheckBox("Auto", this);
+    m_brightnessAutoCheckBox->setVisible(false);
     m_brightnessAutoCheckBox->setToolTip("Enable automatic brightness (disables manual control)");
     connect(m_brightnessAutoCheckBox, &QCheckBox::toggled, this, &CameraSettingsWidget::onBrightnessAutoToggled);
     brightnessLayout->addWidget(m_brightnessAutoCheckBox);
@@ -78,6 +116,7 @@ CameraSettingsWidget::CameraSettingsWidget(CameraController *controller, QWidget
     // Contrast
     QHBoxLayout *contrastLayout = new QHBoxLayout();
     m_contrastAutoCheckBox = new QCheckBox("Auto", this);
+    m_contrastAutoCheckBox->setVisible(false);
     m_contrastAutoCheckBox->setToolTip("Enable automatic contrast (disables manual control)");
     connect(m_contrastAutoCheckBox, &QCheckBox::toggled, this, &CameraSettingsWidget::onContrastAutoToggled);
     contrastLayout->addWidget(m_contrastAutoCheckBox);
@@ -92,6 +131,7 @@ CameraSettingsWidget::CameraSettingsWidget(CameraController *controller, QWidget
     // Saturation
     QHBoxLayout *saturationLayout = new QHBoxLayout();
     m_saturationAutoCheckBox = new QCheckBox("Auto", this);
+    m_saturationAutoCheckBox->setVisible(false);
     m_saturationAutoCheckBox->setToolTip("Enable automatic saturation (disables manual control)");
     connect(m_saturationAutoCheckBox, &QCheckBox::toggled, this, &CameraSettingsWidget::onSaturationAutoToggled);
     saturationLayout->addWidget(m_saturationAutoCheckBox);
@@ -102,6 +142,23 @@ CameraSettingsWidget::CameraSettingsWidget(CameraController *controller, QWidget
     connect(m_saturationSlider, &QSlider::valueChanged, this, &CameraSettingsWidget::onSaturationChanged);
     saturationLayout->addWidget(m_saturationSlider);
     imageLayout->addLayout(saturationLayout);
+
+    QHBoxLayout *hueLayout = new QHBoxLayout();
+    hueLayout->addWidget(new QLabel("Hue:", this));
+    m_hueSlider = new QSlider(Qt::Horizontal, this);
+    m_hueSlider->setRange(0, 100);
+    connect(m_hueSlider, &QSlider::valueChanged, this, &CameraSettingsWidget::onHueChanged);
+    hueLayout->addWidget(m_hueSlider);
+    imageLayout->addLayout(hueLayout);
+
+    QHBoxLayout *sharpnessLayout = new QHBoxLayout();
+    sharpnessLayout->addWidget(new QLabel("Sharpness:", this));
+    m_sharpnessSlider = new QSlider(Qt::Horizontal, this);
+    m_sharpnessSlider->setRange(0, 100);
+    connect(m_sharpnessSlider, &QSlider::valueChanged,
+            this, &CameraSettingsWidget::onSharpnessChanged);
+    sharpnessLayout->addWidget(m_sharpnessSlider);
+    imageLayout->addLayout(sharpnessLayout);
 
     // White Balance
     QHBoxLayout *wbLayout = new QHBoxLayout();
@@ -168,6 +225,30 @@ void CameraSettingsWidget::onFaceFocusToggled(bool checked)
 {
     m_userInitiated = true;
     m_controller->setFaceFocus(checked);
+    m_commandTimer->start(1000);
+}
+
+void CameraSettingsWidget::onExposureAutoToggled(bool checked)
+{
+    m_userInitiated = true;
+    m_exposureComboBox->setEnabled(!checked);
+    m_controller->setExposure(m_exposureComboBox->currentData().toInt(), checked);
+    m_commandTimer->start(1000);
+}
+
+void CameraSettingsWidget::onExposureChanged(int index)
+{
+    if (index < 0 || m_exposureAutoCheckBox->isChecked()) return;
+    m_userInitiated = true;
+    m_controller->setExposure(m_exposureComboBox->itemData(index).toInt(), false);
+    m_commandTimer->start(1000);
+}
+
+void CameraSettingsWidget::onAntiFlickerChanged(int index)
+{
+    if (index < 0) return;
+    m_userInitiated = true;
+    m_controller->setAntiFlicker(m_antiFlickerComboBox->itemData(index).toInt());
     m_commandTimer->start(1000);
 }
 
@@ -255,6 +336,20 @@ void CameraSettingsWidget::onSaturationChanged(int value)
     m_commandTimer->start(1000);
 }
 
+void CameraSettingsWidget::onHueChanged(int value)
+{
+    m_userInitiated = true;
+    m_controller->setHue(value);
+    m_commandTimer->start(1000);
+}
+
+void CameraSettingsWidget::onSharpnessChanged(int value)
+{
+    m_userInitiated = true;
+    m_controller->setSharpness(value);
+    m_commandTimer->start(1000);
+}
+
 void CameraSettingsWidget::onWhiteBalanceChanged(int index)
 {
     Q_UNUSED(index);
@@ -315,6 +410,23 @@ void CameraSettingsWidget::updateFromState(const CameraController::CameraState &
             m_faceFocusCheckBox->blockSignals(false);
         }
 
+        m_exposureAutoCheckBox->blockSignals(true);
+        m_exposureAutoCheckBox->setChecked(state.exposureAuto);
+        m_exposureAutoCheckBox->blockSignals(false);
+        m_exposureComboBox->setEnabled(!state.exposureAuto);
+        int exposureIndex = m_exposureComboBox->findData(state.exposure);
+        if (exposureIndex >= 0) {
+            m_exposureComboBox->blockSignals(true);
+            m_exposureComboBox->setCurrentIndex(exposureIndex);
+            m_exposureComboBox->blockSignals(false);
+        }
+        int flickerIndex = m_antiFlickerComboBox->findData(state.antiFlicker);
+        if (flickerIndex >= 0) {
+            m_antiFlickerComboBox->blockSignals(true);
+            m_antiFlickerComboBox->setCurrentIndex(flickerIndex);
+            m_antiFlickerComboBox->blockSignals(false);
+        }
+
         // Image controls - DON'T update auto checkboxes from camera state
         // These are UI-only flags (camera doesn't have auto brightness/contrast/saturation)
         // The checkboxes are only updated via user interaction or config load
@@ -339,6 +451,16 @@ void CameraSettingsWidget::updateFromState(const CameraController::CameraState &
             m_saturationSlider->blockSignals(true);
             m_saturationSlider->setValue(state.saturation);
             m_saturationSlider->blockSignals(false);
+        }
+        if (m_hueSlider->value() != state.hue) {
+            m_hueSlider->blockSignals(true);
+            m_hueSlider->setValue(state.hue);
+            m_hueSlider->blockSignals(false);
+        }
+        if (m_sharpnessSlider->value() != state.sharpness) {
+            m_sharpnessSlider->blockSignals(true);
+            m_sharpnessSlider->setValue(state.sharpness);
+            m_sharpnessSlider->blockSignals(false);
         }
     }
 
@@ -403,6 +525,10 @@ void CameraSettingsWidget::applyControlRanges()
                QStringLiteral("Adjust image contrast (%1-%2)"));
     applyRange(m_controller->getSaturationRange(), m_saturationSlider, m_saturationRangeApplied,
                QStringLiteral("Adjust color saturation (%1-%2)"));
+    applyRange(m_controller->getHueRange(), m_hueSlider, m_hueRangeApplied,
+               QStringLiteral("Adjust image hue (%1-%2)"));
+    applyRange(m_controller->getSharpnessRange(), m_sharpnessSlider, m_sharpnessRangeApplied,
+               QStringLiteral("Adjust image sharpness (%1-%2)"));
 
     const auto wbRange = m_controller->getWhiteBalanceKelvinRange();
     if (wbRange.valid) {

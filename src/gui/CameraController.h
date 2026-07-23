@@ -51,6 +51,10 @@ public:
         bool faceFocusEnabled;
         bool autoFocusEnabled;
         int manualFocusValue;  // 0-100, motor position when in manual focus
+        int trackingStyle;
+        bool exposureAuto;
+        int exposure;
+        int antiFlicker;
 
         // Image controls
         bool brightnessAuto; // Auto mode for brightness
@@ -59,6 +63,8 @@ public:
         int contrast;        // 0-255
         bool saturationAuto; // Auto mode for saturation
         int saturation;      // 0-255
+        int hue;
+        int sharpness;
         int whiteBalance;    // 0=Auto, 1=Daylight, etc.
         int whiteBalanceKelvin; // Manual Kelvin value when white balance is manual
 
@@ -91,6 +97,7 @@ public:
     // State
     CameraState getCurrentState();
     bool hasTiny2Capabilities() const;
+    bool hasOriginalTinyCapabilities() const { return isOriginalTinyFamily(); }
 
     // Tracking controls
     bool enableAutoFraming(bool enabled);
@@ -112,6 +119,9 @@ public:
     bool setFaceAE(bool enabled);
     bool setFaceFocus(bool enabled);
     bool setFocusAbsolute(int position, bool autoFocus);
+    bool setTrackingStyle(int style);
+    bool setExposure(int shutterTime, bool automatic);
+    bool setAntiFlicker(int frequency);
 
     // Image controls
     void setBrightnessAuto(bool enabled) { m_currentState.brightnessAuto = enabled; }
@@ -120,6 +130,8 @@ public:
     bool setContrast(int value);    // 0-255
     void setSaturationAuto(bool enabled) { m_currentState.saturationAuto = enabled; }
     bool setSaturation(int value);  // 0-255
+    bool setHue(int value);
+    bool setSharpness(int value);
     bool setWhiteBalance(int mode); // 0=Auto, 1=Daylight, etc.
     bool setWhiteBalanceManual(int kelvin);
 
@@ -138,6 +150,10 @@ public:
     ParamRange getBrightnessRange() const { return m_brightnessRange; }
     ParamRange getContrastRange() const { return m_contrastRange; }
     ParamRange getSaturationRange() const { return m_saturationRange; }
+    ParamRange getHueRange() const { return m_hueRange; }
+    ParamRange getSharpnessRange() const { return m_sharpnessRange; }
+    ParamRange getExposureRange() const { return m_exposureRange; }
+    ParamRange getAntiFlickerRange() const { return m_antiFlickerRange; }
     ParamRange getWhiteBalanceKelvinRange() const { return m_whiteBalanceKelvinRange; }
     const std::vector<int>& getSupportedWhiteBalanceTypes() const { return m_supportedWhiteBalanceTypes; }
 
@@ -165,6 +181,10 @@ private:
     ParamRange m_brightnessRange;
     ParamRange m_contrastRange;
     ParamRange m_saturationRange;
+    ParamRange m_hueRange;
+    ParamRange m_sharpnessRange;
+    ParamRange m_exposureRange;
+    ParamRange m_antiFlickerRange;
     ParamRange m_whiteBalanceKelvinRange;
     std::vector<int> m_supportedWhiteBalanceTypes;
     int m_lastRequestedWhiteBalance;

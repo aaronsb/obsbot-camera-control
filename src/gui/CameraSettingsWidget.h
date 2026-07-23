@@ -30,11 +30,11 @@ public:
     int getFOVMode() const { return m_fovComboBox->currentIndex(); }
     bool isFaceAEEnabled() const { return m_faceAECheckBox->isChecked(); }
     bool isFaceFocusEnabled() const { return m_faceFocusCheckBox->isChecked(); }
-    bool isBrightnessAuto() const { return m_brightnessAutoCheckBox->isChecked(); }
+    bool isBrightnessAuto() const { return false; }
     int getBrightness() const { return m_brightnessSlider->value(); }
-    bool isContrastAuto() const { return m_contrastAutoCheckBox->isChecked(); }
+    bool isContrastAuto() const { return false; }
     int getContrast() const { return m_contrastSlider->value(); }
-    bool isSaturationAuto() const { return m_saturationAutoCheckBox->isChecked(); }
+    bool isSaturationAuto() const { return false; }
     int getSaturation() const { return m_saturationSlider->value(); }
     int getWhiteBalance() const { return m_whiteBalanceComboBox->currentData().toInt(); }
     int getWhiteBalanceKelvin() const { return m_whiteBalanceKelvinSlider->value(); }
@@ -61,10 +61,11 @@ public:
         m_faceFocusCheckBox->blockSignals(false);
     }
     void setBrightnessAuto(bool enabled) {
+        Q_UNUSED(enabled);
         m_brightnessAutoCheckBox->blockSignals(true);
-        m_brightnessAutoCheckBox->setChecked(enabled);
+        m_brightnessAutoCheckBox->setChecked(false);
         m_brightnessAutoCheckBox->blockSignals(false);
-        m_brightnessSlider->setEnabled(!enabled);
+        m_brightnessSlider->setEnabled(true);
     }
     void setBrightness(int value) {
         m_brightnessSlider->blockSignals(true);
@@ -72,10 +73,11 @@ public:
         m_brightnessSlider->blockSignals(false);
     }
     void setContrastAuto(bool enabled) {
+        Q_UNUSED(enabled);
         m_contrastAutoCheckBox->blockSignals(true);
-        m_contrastAutoCheckBox->setChecked(enabled);
+        m_contrastAutoCheckBox->setChecked(false);
         m_contrastAutoCheckBox->blockSignals(false);
-        m_contrastSlider->setEnabled(!enabled);
+        m_contrastSlider->setEnabled(true);
     }
     void setContrast(int value) {
         m_contrastSlider->blockSignals(true);
@@ -83,10 +85,11 @@ public:
         m_contrastSlider->blockSignals(false);
     }
     void setSaturationAuto(bool enabled) {
+        Q_UNUSED(enabled);
         m_saturationAutoCheckBox->blockSignals(true);
-        m_saturationAutoCheckBox->setChecked(enabled);
+        m_saturationAutoCheckBox->setChecked(false);
         m_saturationAutoCheckBox->blockSignals(false);
-        m_saturationSlider->setEnabled(!enabled);
+        m_saturationSlider->setEnabled(true);
     }
     void setSaturation(int value) {
         m_saturationSlider->blockSignals(true);
@@ -116,12 +119,17 @@ private slots:
     void onFOVChanged(int index);
     void onFaceAEToggled(bool checked);
     void onFaceFocusToggled(bool checked);
+    void onExposureAutoToggled(bool checked);
+    void onExposureChanged(int index);
+    void onAntiFlickerChanged(int index);
     void onBrightnessAutoToggled(bool checked);
     void onBrightnessChanged(int value);
     void onContrastAutoToggled(bool checked);
     void onContrastChanged(int value);
     void onSaturationAutoToggled(bool checked);
     void onSaturationChanged(int value);
+    void onHueChanged(int value);
+    void onSharpnessChanged(int value);
     void onWhiteBalanceChanged(int index);
     void onWhiteBalanceKelvinChanged(int value);
 
@@ -132,6 +140,9 @@ private:
     QComboBox *m_fovComboBox;
     QCheckBox *m_faceAECheckBox;
     QCheckBox *m_faceFocusCheckBox;
+    QCheckBox *m_exposureAutoCheckBox;
+    QComboBox *m_exposureComboBox;
+    QComboBox *m_antiFlickerComboBox;
 
     // Image controls
     QCheckBox *m_brightnessAutoCheckBox;
@@ -140,6 +151,8 @@ private:
     QSlider *m_contrastSlider;
     QCheckBox *m_saturationAutoCheckBox;
     QSlider *m_saturationSlider;
+    QSlider *m_hueSlider;
+    QSlider *m_sharpnessSlider;
     QComboBox *m_whiteBalanceComboBox;
     QSlider *m_whiteBalanceKelvinSlider;
     QLabel *m_whiteBalanceKelvinLabel;
@@ -149,6 +162,8 @@ private:
     bool m_brightnessRangeApplied = false;
     bool m_contrastRangeApplied = false;
     bool m_saturationRangeApplied = false;
+    bool m_hueRangeApplied = false;
+    bool m_sharpnessRangeApplied = false;
     bool m_whiteBalanceRangeApplied = false;
 
     void applyControlRanges();

@@ -56,6 +56,7 @@ private slots:
     void onAutoZoomToggled(bool checked);
     void onSpeedChanged(int index);
     void onAudioGainToggled(bool checked);
+    void onTrackingStyleChanged(int index);
 
     // Manual PTZ control slots
     void onXYPadChanged(float x, float y);
@@ -71,6 +72,8 @@ private:
     QComboBox *m_speedCombo;
     QCheckBox *m_audioGainCheckBox;
     QWidget *m_advancedContainer;
+    QWidget *m_originalTinyContainer;
+    QComboBox *m_trackingStyleCombo;
     bool m_userInitiated;  // Track if change was user-initiated
     QTimer *m_commandTimer;  // Debounce timer for command completion
     bool m_tiny2Capabilities; // flag for advanced tracking features

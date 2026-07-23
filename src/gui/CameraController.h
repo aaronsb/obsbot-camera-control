@@ -152,6 +152,7 @@ private:
     std::shared_ptr<Device> m_device;
     bool m_connected;
     QString m_selectedDevicePath;
+    quint64 m_connectionAttempt = 0;
     bool m_v4l2Only = false;
     V4l2Backend m_v4l2;
     QTimer *m_v4l2ScanTimer = nullptr;

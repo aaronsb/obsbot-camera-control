@@ -36,6 +36,7 @@ void CameraController::connectToCamera()
 
 void CameraController::connectToCamera(const QString &devicePath)
 {
+    const quint64 connectionAttempt = ++m_connectionAttempt;
     m_selectedDevicePath = devicePath;
 
     auto pickDevice = [this](const std::list<std::shared_ptr<Device>> &list)
@@ -108,8 +109,8 @@ void CameraController::connectToCamera(const QString &devicePath)
         // still empty here. An immediate fallback would win that race every
         // launch and lock the UI into V4L2-only mode; give the SDK a grace
         // period before settling for plain V4L2.
-        QTimer::singleShot(8000, this, [this]() {
-            if (!m_connected)
+        QTimer::singleShot(8000, this, [this, connectionAttempt]() {
+            if (connectionAttempt == m_connectionAttempt && !m_connected)
                 tryV4l2Fallback();
         });
     }
@@ -222,6 +223,12 @@ void CameraController::updateV4l2State()
 
 void CameraController::disconnectFromCamera()
 {
+    // Invalidate any delayed fallback belonging to the connection being
+    // closed, even when SDK discovery has not completed yet.
+    ++m_connectionAttempt;
+    if (m_v4l2ScanTimer)
+        m_v4l2ScanTimer->stop();
+
     if (m_connected) {
         if (m_v4l2Only) {
             m_v4l2.close();

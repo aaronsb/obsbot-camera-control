@@ -588,6 +588,13 @@ bool CameraController::setFaceFocus(bool enabled)
 {
     if (!m_connected || m_v4l2Only) return false;
 
+    // Face focus selects the subject to prioritize; it does not itself leave
+    // manual lens mode. Ensure the lens can actually follow that subject.
+    if (enabled && !m_currentState.autoFocusEnabled
+            && !setFocusAbsolute(m_currentState.manualFocusValue, true)) {
+        return false;
+    }
+
     bool success = executeCommand(enabled ? "Enable Face Focus" : "Disable Face Focus", [this, enabled]() {
         return m_device->cameraSetFaceFocusR(enabled);
     });
@@ -1173,7 +1180,7 @@ void CameraController::applyConfigToCamera()
     setFaceFocus(settings.faceFocus);
     setZoom(settings.zoom);
     setPanTilt(settings.pan, settings.tilt);
-    if (settings.focus >= 0) {
+    if (settings.focus >= 0 && !settings.faceFocus) {
         setFocusAbsolute(settings.focus, false);
     } else {
         setFocusAbsolute(0, true);
@@ -1233,7 +1240,8 @@ void CameraController::applyCurrentStateToCamera(const CameraState &uiState)
     setFOV(uiState.fovMode);
     setFaceAE(uiState.faceAEEnabled);
     setFaceFocus(uiState.faceFocusEnabled);
-    setFocusAbsolute(uiState.manualFocusValue, uiState.autoFocusEnabled);
+    setFocusAbsolute(uiState.manualFocusValue,
+                     uiState.autoFocusEnabled || uiState.faceFocusEnabled);
     setZoom(uiState.zoom);
     setPanTilt(uiState.pan, uiState.tilt);
 

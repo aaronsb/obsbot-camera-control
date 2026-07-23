@@ -27,18 +27,6 @@ static QString productDisplayName(int productType, const QString &fallback)
     }
 }
 
-static int shutterTypeToV4l2(int shutterType)
-{
-    static constexpr double denominators[] = {
-        8000, 6400, 5000, 4000, 3200, 2500, 2000, 1600, 1250, 1000,
-        800, 640, 500, 400, 320, 240, 200, 160, 120, 100, 80, 60, 50,
-        40, 30, 25, 20, 15, 12.5, 10, 8, 6.25, 5, 4
-    };
-    int index = qBound(0, shutterType - 9, 33);
-    // V4L2_CID_EXPOSURE_ABSOLUTE is measured in 100 microsecond units.
-    return qMax(1, qRound(10000.0 / denominators[index]));
-}
-
 CameraController::CameraController(QObject *parent)
     : QObject(parent)
     , m_connected(false)
@@ -627,22 +615,8 @@ bool CameraController::setTrackingStyle(int style)
 bool CameraController::setExposure(int shutterTime, bool automatic)
 {
     if (!m_connected || m_v4l2Only) return false;
+    if (isTiny4k()) return false;
     int clamped = clampToRange(shutterTime, m_exposureRange, 9, 42);
-
-    if (isTiny4k()) {
-        V4l2Backend exposureBackend;
-        if (!exposureBackend.open(m_device->videoDevPath()))
-            return false;
-        bool success = exposureBackend.setAutoExposure(automatic);
-        if (success && !automatic)
-            success = exposureBackend.setExposureAbsolute(shutterTypeToV4l2(clamped));
-        if (success) {
-            m_currentState.exposureAuto = automatic;
-            m_currentState.exposure = clamped;
-            emit stateChanged(m_currentState);
-        }
-        return success;
-    }
 
     bool success = executeCommand(automatic ? "Enable auto exposure" : "Set exposure",
                                   [this, clamped, automatic]() {
@@ -935,16 +909,7 @@ void CameraController::updateState()
     if (m_device->cameraGetImageSharpR(sharpness) == 0)
         m_currentState.sharpness = clampToRange(sharpness, m_sharpnessRange, 0, 100);
 
-    if (isTiny4k()) {
-        V4l2Backend exposureBackend;
-        if (exposureBackend.open(m_device->videoDevPath())) {
-            int mode = exposureBackend.getControl(V4L2_CID_EXPOSURE_AUTO);
-            if (mode >= 0)
-                m_currentState.exposureAuto =
-                    mode == V4L2_EXPOSURE_AUTO ||
-                    mode == V4L2_EXPOSURE_SHUTTER_PRIORITY;
-        }
-    } else {
+    if (!isTiny4k()) {
         int32_t exposure = m_currentState.exposure;
         bool exposureAuto = m_currentState.exposureAuto;
         if (m_device->cameraGetExposureAbsolute(exposure, exposureAuto) == 0) {

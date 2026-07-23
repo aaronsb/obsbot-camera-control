@@ -72,7 +72,8 @@ CameraSettingsWidget::CameraSettingsWidget(CameraController *controller, QWidget
         m_exposureComboBox->addItem(shutterNames[i], 9 + i);
     connect(m_exposureComboBox, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, &CameraSettingsWidget::onExposureChanged);
-    exposureLayout->addWidget(new QLabel("Shutter:", this));
+    m_exposureLabel = new QLabel("Shutter:", this);
+    exposureLayout->addWidget(m_exposureLabel);
     exposureLayout->addWidget(m_exposureComboBox);
     exposureLayout->addStretch();
     groupLayout->addLayout(exposureLayout);
@@ -382,10 +383,12 @@ void CameraSettingsWidget::updateFromState(const CameraController::CameraState &
     applyControlRanges();
 
     const bool tiny4k = m_controller->hasTiny4kCapabilities();
-    m_exposureAutoCheckBox->setText(tiny4k ? "Adaptive Exposure" : "Auto Exposure");
-    m_exposureAutoCheckBox->setToolTip(tiny4k
-        ? "Use the Tiny 4K's supported shutter-priority mode to adapt gain to changing light"
-        : "Continuously adapt exposure to changing light");
+    // Tiny 4K firmware 1.2.6.2 boots in a camera-managed exposure mode that
+    // neither its SDK nor UVC menu can restore after switching to manual.
+    // Do not expose a one-way control that can leave the image overexposed.
+    m_exposureAutoCheckBox->setVisible(!tiny4k);
+    m_exposureLabel->setVisible(!tiny4k);
+    m_exposureComboBox->setVisible(!tiny4k);
 
     // Only update if state differs, not user-initiated, command timer expired, and not settling
     bool commandInFlight = m_commandTimer->isActive();

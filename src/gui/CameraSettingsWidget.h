@@ -141,6 +141,7 @@ private:
     QCheckBox *m_faceAECheckBox;
     QCheckBox *m_faceFocusCheckBox;
     QCheckBox *m_exposureAutoCheckBox;
+    QLabel *m_exposureLabel;
     QComboBox *m_exposureComboBox;
     QComboBox *m_antiFlickerComboBox;
 

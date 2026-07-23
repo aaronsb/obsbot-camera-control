@@ -163,16 +163,8 @@ V4l2Backend::ControlRange V4l2Backend::getZoomRange() { return queryRange(V4L2_C
 
 bool V4l2Backend::setAutoExposure(bool automatic)
 {
-    if (!automatic)
-        return setControl(V4L2_CID_EXPOSURE_AUTO, V4L2_EXPOSURE_MANUAL);
-
-    // Some UVC cameras (including Tiny 4K firmware 1.2.6.2) advertise the
-    // standard Auto value but mark it unavailable. Shutter Priority is their
-    // supported adaptive mode: shutter stays selected while gain follows
-    // changing light.
-    if (setControl(V4L2_CID_EXPOSURE_AUTO, V4L2_EXPOSURE_AUTO))
-        return true;
-    return setControl(V4L2_CID_EXPOSURE_AUTO, V4L2_EXPOSURE_SHUTTER_PRIORITY);
+    return setControl(V4L2_CID_EXPOSURE_AUTO,
+                      automatic ? V4L2_EXPOSURE_AUTO : V4L2_EXPOSURE_MANUAL);
 }
 
 bool V4l2Backend::setExposureAbsolute(int value) { return setControl(V4L2_CID_EXPOSURE_ABSOLUTE, value); }

@@ -1233,6 +1233,7 @@ void CameraController::applyCurrentStateToCamera(const CameraState &uiState)
     setFOV(uiState.fovMode);
     setFaceAE(uiState.faceAEEnabled);
     setFaceFocus(uiState.faceFocusEnabled);
+    setFocusAbsolute(uiState.manualFocusValue, uiState.autoFocusEnabled);
     setZoom(uiState.zoom);
     setPanTilt(uiState.pan, uiState.tilt);
 

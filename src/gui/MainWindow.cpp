@@ -1060,7 +1060,14 @@ void MainWindow::onCameraConnected(const CameraController::CameraInfo &info)
     // the camera's initial state. Capture the configured/user-intended values
     // now, otherwise that initial state (Tiny 4K boots with Wide FOV) replaces
     // the UI value before the delayed reapply runs.
-    const CameraController::CameraState intendedState = getUIState();
+    CameraController::CameraState intendedState = getUIState();
+    const auto savedSettings = m_controller->getConfig().getSettings();
+    intendedState.zoom = savedSettings.zoom;
+    intendedState.pan = savedSettings.pan;
+    intendedState.tilt = savedSettings.tilt;
+    intendedState.autoFocusEnabled = savedSettings.focus < 0;
+    intendedState.manualFocusValue =
+        intendedState.autoFocusEnabled ? 0 : savedSettings.focus;
     QTimer::singleShot(100, this, [this, intendedState]() {
         if (m_isCameraSwitch) {
             // Pull the new camera's actual state into the UI

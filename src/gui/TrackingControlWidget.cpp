@@ -315,9 +315,6 @@ void TrackingControlWidget::onTrackingToggled(bool checked)
     }
 
     m_controller->enableAutoFraming(checked);
-    setFaceFocusEnabled(checked);
-    m_controller->setFaceFocus(checked);
-    m_controller->setFaceAE(checked);
 
     // Update PTZ controls state (disable when auto-framing is on)
     updatePTZControlsState();

@@ -318,6 +318,13 @@ bool CameraController::enableAutoFraming(bool enabled)
 {
     if (!m_connected || m_v4l2Only) return false;
 
+    const bool preservedFaceAE = m_currentState.faceAEEnabled;
+    const bool preservedFaceFocus = m_currentState.faceFocusEnabled;
+    auto restoreFaceControls = [this, preservedFaceAE, preservedFaceFocus]() {
+        setFaceAE(preservedFaceAE);
+        setFaceFocus(preservedFaceFocus);
+    };
+
     // Tiny and Tiny 4K predate the AiWorkMode/MediaMode APIs.  The SDK sample
     // and API documentation require target selection for these two cameras.
     if (isOriginalTinyFamily()) {
@@ -326,6 +333,7 @@ bool CameraController::enableAutoFraming(bool enabled)
             return m_device->aiSetTargetSelectR(enabled);
         });
         if (success) {
+            restoreFaceControls();
             m_currentState.autoFramingEnabled = enabled;
             emit stateChanged(m_currentState);
         }
@@ -341,14 +349,14 @@ bool CameraController::enableAutoFraming(bool enabled)
         }
 
         // Step 2: Set auto-framing mode after a brief delay (non-blocking)
-        QTimer::singleShot(500, [this]() {
+        QTimer::singleShot(500, this,
+                [this, preservedFaceAE, preservedFaceFocus]() {
             executeCommand("Set AutoFraming mode", [this]() {
                 return m_device->cameraSetAutoFramingModeU(Device::AutoFrmSingle, Device::AutoFrmUpperBody);
             });
+            setFaceAE(preservedFaceAE);
+            setFaceFocus(preservedFaceFocus);
         });
-
-        // Restore auto focus when auto-framing is enabled
-        setFocusAbsolute(0, true);
 
         m_currentState.autoFramingEnabled = true;
         emit stateChanged(m_currentState);
@@ -358,9 +366,7 @@ bool CameraController::enableAutoFraming(bool enabled)
             return m_device->cameraSetMediaModeU(Device::MediaModeNormal);
         });
         if (success) {
-            // Switch to manual focus when auto-framing is disabled
-            setFocusAbsolute(m_currentState.manualFocusValue, false);
-
+            restoreFaceControls();
             m_currentState.autoFramingEnabled = false;
             emit stateChanged(m_currentState);
         }

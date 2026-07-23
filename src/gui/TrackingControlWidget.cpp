@@ -122,7 +122,45 @@ TrackingControlWidget::TrackingControlWidget(CameraController *controller, QWidg
 
     layout->addWidget(m_trackingGroupBox);
 
-    // Manual PTZ Controls (disabled when auto-framing is enabled)
+    // Zoom remains available while auto-framing is enabled.
+    QGroupBox *zoomGroupBox = new QGroupBox("Zoom", this);
+    zoomGroupBox->setFlat(true);
+    QVBoxLayout *zoomGroupLayout = new QVBoxLayout(zoomGroupBox);
+    zoomGroupLayout->setContentsMargins(16, 16, 16, 16);
+    zoomGroupLayout->setSpacing(8);
+
+    QHBoxLayout *zoomLayout = new QHBoxLayout();
+    m_zoomSlider = new QSlider(Qt::Horizontal, this);
+    m_zoomSlider->setMinimum(100);  // 1.00x
+    m_zoomSlider->setMaximum(200);  // 2.00x
+    m_zoomSlider->setValue(100);
+    connect(m_zoomSlider, &QSlider::valueChanged,
+            this, &TrackingControlWidget::onZoomChanged);
+    zoomLayout->addWidget(m_zoomSlider, 1);
+    m_zoomLabel = new QLabel("1.00x", this);
+    m_zoomLabel->setMinimumWidth(40);
+    zoomLayout->addWidget(m_zoomLabel);
+    zoomGroupLayout->addLayout(zoomLayout);
+
+    QHBoxLayout *fovLayout = new QHBoxLayout();
+    static const char *fovLabels[] = {
+        "Wide (86°)", "Medium (78°)", "Narrow (65°)"
+    };
+    for (int mode = 0; mode < 3; ++mode) {
+        m_fovButtons[mode] = new QPushButton(fovLabels[mode], this);
+        m_fovButtons[mode]->setCheckable(true);
+        m_fovButtons[mode]->setAutoExclusive(true);
+        connect(m_fovButtons[mode], &QPushButton::clicked, this, [this, mode]() {
+            m_userInitiated = true;
+            m_controller->setFOV(mode);
+            m_commandTimer->start(1000);
+        });
+        fovLayout->addWidget(m_fovButtons[mode]);
+    }
+    zoomGroupLayout->addLayout(fovLayout);
+    layout->addWidget(zoomGroupBox);
+
+    // Manual pan/tilt/focus controls (disabled when auto-framing is enabled)
     m_ptzContainer = new QWidget(this);
     QVBoxLayout *ptzContainerLayout = new QVBoxLayout(m_ptzContainer);
     ptzContainerLayout->setContentsMargins(0, 0, 0, 0);
@@ -141,22 +179,6 @@ TrackingControlWidget::TrackingControlWidget(CameraController *controller, QWidg
     // Left column: sliders and checkboxes
     QVBoxLayout *leftColumn = new QVBoxLayout();
     leftColumn->addStretch();
-
-    // Zoom slider
-    QHBoxLayout *zoomLayout = new QHBoxLayout();
-    QLabel *zoomLabel = new QLabel("Zoom:", this);
-    zoomLabel->setFixedWidth(40);
-    zoomLayout->addWidget(zoomLabel);
-    m_zoomSlider = new QSlider(Qt::Horizontal, this);
-    m_zoomSlider->setMinimum(100);  // 1.00x
-    m_zoomSlider->setMaximum(200);  // 2.00x
-    m_zoomSlider->setValue(100);
-    connect(m_zoomSlider, &QSlider::valueChanged, this, &TrackingControlWidget::onZoomChanged);
-    zoomLayout->addWidget(m_zoomSlider);
-    m_zoomLabel = new QLabel("1.0x", this);
-    m_zoomLabel->setMinimumWidth(40);
-    zoomLayout->addWidget(m_zoomLabel);
-    leftColumn->addLayout(zoomLayout);
 
     // Focus slider
     QHBoxLayout *focusLayout = new QHBoxLayout();
@@ -366,6 +388,14 @@ void TrackingControlWidget::updateFromState(const CameraController::CameraState 
         }
     }
 
+    if (!commandInFlight && !isSettling) {
+        for (int mode = 0; mode < 3; ++mode) {
+            m_fovButtons[mode]->blockSignals(true);
+            m_fovButtons[mode]->setChecked(state.fovMode == mode);
+            m_fovButtons[mode]->blockSignals(false);
+        }
+    }
+
     // Sync XY pad and position label from camera state (skip during active drag)
     if (!m_xyPad->isDragging() && !commandInFlight && !isSettling) {
         float padX = state.pan;
@@ -460,6 +490,7 @@ void TrackingControlWidget::setTrackingStyle(int style)
         m_trackingStyleCombo->setCurrentIndex(index);
         m_trackingStyleCombo->blockSignals(false);
     }
+
 }
 
 void TrackingControlWidget::onTrackingStyleChanged(int index)

@@ -6,6 +6,7 @@
 #include <QComboBox>
 #include <QSlider>
 #include <QLabel>
+#include <QPushButton>
 #include <QHBoxLayout>
 #include <QVBoxLayout>
 #include <QGroupBox>
@@ -81,6 +82,7 @@ private:
     QCheckBox *m_invertControlsCheckBox;
     QSlider *m_zoomSlider;
     QLabel *m_zoomLabel;
+    QPushButton *m_fovButtons[3];
     QSlider *m_focusSlider;
     QLabel *m_focusLabel;
     QLabel *m_positionLabel;

@@ -34,9 +34,8 @@ CameraSettingsWidget::CameraSettingsWidget(CameraController *controller, QWidget
     connect(m_hdrCheckBox, &QCheckBox::toggled, this, &CameraSettingsWidget::onHDRToggled);
     groupLayout->addWidget(m_hdrCheckBox);
 
-    // Named zoom/FOV presets
-    QHBoxLayout *fovLayout = new QHBoxLayout();
-    fovLayout->addWidget(new QLabel("Zoom preset:", this));
+    // Retained as an internal state holder for configuration and image
+    // presets; the visible controls live beside the Zoom slider.
     m_fovComboBox = new QComboBox(this);
     m_fovComboBox->addItem("Wide (86°)", 0);
     m_fovComboBox->addItem("Medium (78°)", 1);
@@ -45,13 +44,9 @@ CameraSettingsWidget::CameraSettingsWidget(CameraController *controller, QWidget
     if (auto *model = qobject_cast<QStandardItemModel*>(m_fovComboBox->model())) {
         model->item(3)->setEnabled(false);
     }
-    m_fovComboBox->setToolTip(
-        "Select a named field-of-view preset; manual zoom is shown as Custom");
     connect(m_fovComboBox, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, &CameraSettingsWidget::onFOVChanged);
-    fovLayout->addWidget(m_fovComboBox);
-    fovLayout->addStretch();
-    groupLayout->addLayout(fovLayout);
+    m_fovComboBox->hide();
 
     // Face AE
     m_faceAECheckBox = new QCheckBox("Face-based Auto Exposure", this);

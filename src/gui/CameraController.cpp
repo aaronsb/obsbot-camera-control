@@ -610,6 +610,15 @@ bool CameraController::setFocusAbsolute(int position, bool autoFocus)
     if (!m_connected) return false;
     position = qBound(0, position, 100);
 
+    if (!autoFocus && m_currentState.faceFocusEnabled && !m_v4l2Only) {
+        if (!executeCommand("Disable Face Focus", [this]() {
+                return m_device->cameraSetFaceFocusR(false);
+            })) {
+            return false;
+        }
+        m_currentState.faceFocusEnabled = false;
+    }
+
     bool success;
     if (m_v4l2Only) {
         m_v4l2.setAutoFocus(autoFocus);
@@ -1065,7 +1074,10 @@ void CameraController::updateState()
     m_currentState.faceFocusEnabled = status.tiny.face_auto_focus;
     m_currentState.autoFocusEnabled = status.tiny.auto_focus;
     m_currentState.manualFocusValue = status.tiny.manual_focus_value;
-    m_currentState.fovMode = status.tiny.fov;
+    if (status.tiny.fov >= Device::FovType86
+            && status.tiny.fov <= Device::FovType65) {
+        m_currentState.fovMode = status.tiny.fov;
+    }
     m_currentState.devStatus = status.tiny.dev_status;
     m_currentState.autoFramingEnabled = isOriginalTinyFamily()
         ? status.tiny.ai_target != 0

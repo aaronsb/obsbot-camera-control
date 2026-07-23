@@ -583,6 +583,9 @@ bool CameraController::setFOV(int fovMode)
         static constexpr double presetZoom[] = {1.00, 1.05, 1.15};
         m_currentState.zoom = presetZoom[fovMode];
         m_currentState.zoomRatio = qRound(m_currentState.zoom * 100.0);
+        // Tiny/Tiny 4K can briefly report the previous zoom after changing
+        // FOV. Preserve the intended preset until the camera has caught up.
+        m_zoomPollingPause.start();
         emit stateChanged(m_currentState);
     }
     return success;
@@ -1081,16 +1084,20 @@ void CameraController::updateState(bool includeImageControls)
     // Tiny/Tiny 4K firmware 1.2.6.2 returns 2.0 from the normalized getter
     // regardless of the actual zoom. Its status field reliably reports a
     // 0..100 offset from 1.0x instead.
-    if (isOriginalTinyFamily() && status.tiny.zoom_ratio <= 100) {
-        m_currentState.zoom = 1.0
-            + static_cast<double>(status.tiny.zoom_ratio) / 100.0;
-        m_currentState.zoomRatio = qRound(m_currentState.zoom * 100.0);
-    } else {
-        float zoom = 1.0f;
-        if (m_device->cameraGetZoomAbsoluteR(zoom) == 0
-                && zoom >= 1.0f && zoom <= 2.0f) {
-            m_currentState.zoom = zoom;
-            m_currentState.zoomRatio = qRound(zoom * 100.0f);
+    const bool zoomPollingPaused =
+        m_zoomPollingPause.isValid() && m_zoomPollingPause.elapsed() < 1000;
+    if (!zoomPollingPaused) {
+        if (isOriginalTinyFamily() && status.tiny.zoom_ratio <= 100) {
+            m_currentState.zoom = 1.0
+                + static_cast<double>(status.tiny.zoom_ratio) / 100.0;
+            m_currentState.zoomRatio = qRound(m_currentState.zoom * 100.0);
+        } else {
+            float zoom = 1.0f;
+            if (m_device->cameraGetZoomAbsoluteR(zoom) == 0
+                    && zoom >= 1.0f && zoom <= 2.0f) {
+                m_currentState.zoom = zoom;
+                m_currentState.zoomRatio = qRound(zoom * 100.0f);
+            }
         }
     }
     m_currentState.hdrEnabled = status.tiny.hdr;

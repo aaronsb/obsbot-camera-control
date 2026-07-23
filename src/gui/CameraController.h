@@ -2,6 +2,7 @@
 #define CAMERACONTROLLER_H
 
 #include <QObject>
+#include <QElapsedTimer>
 #include <QTimer>
 #include <QMap>
 #include <memory>
@@ -201,6 +202,7 @@ private:
     CameraState m_cachedState;  // Cache intended state during settling
     Config m_config;
     QTimer *m_settlingTimer;  // Timer for settling period after config apply
+    QElapsedTimer m_zoomPollingPause;
     ParamRange m_brightnessRange;
     ParamRange m_contrastRange;
     ParamRange m_saturationRange;

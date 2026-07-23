@@ -149,7 +149,6 @@ TrackingControlWidget::TrackingControlWidget(CameraController *controller, QWidg
     for (int mode = 0; mode < 3; ++mode) {
         m_fovButtons[mode] = new QPushButton(fovLabels[mode], this);
         m_fovButtons[mode]->setCheckable(true);
-        m_fovButtons[mode]->setAutoExclusive(true);
         connect(m_fovButtons[mode], &QPushButton::clicked, this, [this, mode]() {
             m_userInitiated = true;
             m_controller->setFOV(mode);
@@ -389,9 +388,11 @@ void TrackingControlWidget::updateFromState(const CameraController::CameraState 
     }
 
     if (!commandInFlight && !isSettling) {
+        static constexpr int presetZoom[] = {100, 105, 115};
+        const int currentZoom = qRound(state.zoom * 100.0);
         for (int mode = 0; mode < 3; ++mode) {
             m_fovButtons[mode]->blockSignals(true);
-            m_fovButtons[mode]->setChecked(state.fovMode == mode);
+            m_fovButtons[mode]->setChecked(currentZoom == presetZoom[mode]);
             m_fovButtons[mode]->blockSignals(false);
         }
     }

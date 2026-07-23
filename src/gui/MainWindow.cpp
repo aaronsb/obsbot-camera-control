@@ -337,21 +337,17 @@ void MainWindow::setupUI()
 
     QHBoxLayout *statusMainLayout = new QHBoxLayout();
     statusMainLayout->setContentsMargins(0, 0, 0, 0);
-    statusMainLayout->setSpacing(14);
+    statusMainLayout->setSpacing(10);
 
-    QVBoxLayout *statusTextLayout = new QVBoxLayout();
-    statusTextLayout->setContentsMargins(0, 0, 0, 0);
-    statusTextLayout->setSpacing(6);
-    m_statusChip = new QLabel(tr("Offline"), m_statusBanner);
+    m_statusChip = new QLabel(m_statusBanner);
     m_statusChip->setObjectName("statusChip");
-    m_statusChip->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Preferred);
-    statusTextLayout->addWidget(m_statusChip, 0, Qt::AlignLeft);
+    m_statusChip->setFixedSize(12, 12);
+    statusMainLayout->addWidget(m_statusChip, 0, Qt::AlignVCenter);
 
     m_deviceInfoLabel = new QLabel(tr("Connecting to camera..."), m_statusBanner);
     m_deviceInfoLabel->setObjectName("deviceInfoLabel");
     m_deviceInfoLabel->setWordWrap(true);
-    statusTextLayout->addWidget(m_deviceInfoLabel);
-    statusMainLayout->addLayout(statusTextLayout, 1);
+    statusMainLayout->addWidget(m_deviceInfoLabel, 1);
 
     QWidget *actionRow = new QWidget(m_statusBanner);
     actionRow->setObjectName("actionRow");
@@ -370,6 +366,8 @@ void MainWindow::setupUI()
     m_reconnectButton->setObjectName("secondaryAction");
     connect(m_reconnectButton, &QPushButton::clicked, this, [this]() {
         m_controller->disconnectFromCamera();
+        m_deviceInfoLabel->setText(tr("Connecting to camera..."));
+        m_statusLabel->setText(tr("Status: Connecting..."));
         m_controller->connectToCamera();
     });
     actionLayout->addWidget(m_reconnectButton);
@@ -381,6 +379,11 @@ void MainWindow::setupUI()
     m_cameraWarningLabel->setWordWrap(true);
     m_cameraWarningLabel->setVisible(false);
     statusLayout->addWidget(m_cameraWarningLabel);
+
+    m_statusLabel = new QLabel(tr("Status: Initializing..."), m_statusBanner);
+    m_statusLabel->setObjectName("footerStatus");
+    m_statusLabel->setWordWrap(true);
+    statusLayout->addWidget(m_statusLabel);
 
     scrollLayout->addWidget(m_statusBanner);
 
@@ -551,11 +554,6 @@ void MainWindow::setupUI()
 
     scrollLayout->addStretch();
 
-    m_statusLabel = new QLabel(tr("Status: Initializing..."), scrollContent);
-    m_statusLabel->setObjectName("footerStatus");
-    m_statusLabel->setWordWrap(true);
-    scrollLayout->addWidget(m_statusLabel);
-
     controlScroll->setWidget(scrollContent);
     controlLayout->addWidget(controlScroll);
 
@@ -695,12 +693,9 @@ void MainWindow::applyModernStyle()
             font-weight: 600;
         }
         QLabel#statusChip {
-            padding: 6px 12px;
-            border-radius: 14px;
+            border-radius: 6px;
             background-color: %7;
             color: %8;
-            font-weight: 600;
-            letter-spacing: 0.3px;
         }
         QFrame#statusBanner[state="connected"] QLabel#statusChip {
             background-color: %9;
@@ -949,7 +944,6 @@ void MainWindow::updatePreviewControls()
 void MainWindow::updateStatusBanner(bool connected)
 {
     m_statusBanner->setProperty("state", connected ? "connected" : "disconnected");
-    m_statusChip->setText(connected ? tr("Online") : tr("Offline"));
     m_statusBanner->style()->unpolish(m_statusBanner);
     m_statusBanner->style()->polish(m_statusBanner);
     m_statusBanner->update();
@@ -1115,7 +1109,7 @@ void MainWindow::onCameraConnected(const CameraController::CameraInfo &info)
 void MainWindow::onCameraDisconnected()
 {
     m_isCameraSwitch = false;
-    m_deviceInfoLabel->setText("❌ Camera Disconnected");
+    m_deviceInfoLabel->setText(tr("Camera disconnected"));
     updateStatusBanner(false);
     m_statusLabel->setText("Status: Not connected");
     m_cameraWarningLabel->setVisible(false);

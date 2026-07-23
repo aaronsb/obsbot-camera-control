@@ -432,13 +432,6 @@ void MainWindow::setupUI()
     m_effectsWidget = new VideoEffectsWidget(this);
     connect(m_effectsWidget, &VideoEffectsWidget::effectsChanged,
             this, &MainWindow::onVideoEffectsChanged);
-    // Mirror checkbox in tracking tab syncs with Creative FX horizontal flip
-    connect(m_trackingWidget, &TrackingControlWidget::mirrorToggled,
-            this, [this](bool mirrored) {
-                auto settings = m_effectsWidget->settings();
-                settings.horizontalFlip = mirrored;
-                m_effectsWidget->applySettings(settings);
-            });
     m_tabWidget->addTab(m_effectsWidget, tr("Creative FX"));
     scrollLayout->addWidget(m_tabWidget);
     m_effectsWidget->reset();
@@ -1959,7 +1952,6 @@ void MainWindow::onVideoEffectsChanged(const FilterPreviewWidget::VideoEffectsSe
         return;
     }
     m_previewWidget->setVideoEffects(settings);
-    m_trackingWidget->setMirrored(settings.horizontalFlip);
 }
 
 void MainWindow::onSnapshotCaptured(const QImage &image)

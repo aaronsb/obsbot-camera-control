@@ -45,11 +45,7 @@ public:
     int currentTrackSpeed() const { return m_speedCombo->currentData().toInt(); }
     int currentTrackingStyle() const { return m_trackingStyleCombo->currentData().toInt(); }
     bool isAudioAutoGainEnabled() const { return m_audioGainCheckBox->isChecked(); }
-    void setMirrored(bool mirrored);
     bool isInvertControls() const { return m_invertControlsCheckBox->isChecked(); }
-
-signals:
-    void mirrorToggled(bool mirrored);
 
 private slots:
     void onTrackingToggled(bool checked);
@@ -83,7 +79,6 @@ private:
     // Manual PTZ controls
     XYPad *m_xyPad;
     QCheckBox *m_invertControlsCheckBox;
-    QCheckBox *m_mirrorCheckBox;
     QSlider *m_zoomSlider;
     QLabel *m_zoomLabel;
     QSlider *m_focusSlider;

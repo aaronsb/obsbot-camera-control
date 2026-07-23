@@ -355,6 +355,28 @@ void MainWindow::setupUI()
     m_cameraWarningLabel->setVisible(false);
     statusLayout->addWidget(m_cameraWarningLabel);
 
+    QWidget *actionRow = new QWidget(m_statusBanner);
+    actionRow->setObjectName("actionRow");
+    QHBoxLayout *actionLayout = new QHBoxLayout(actionRow);
+    actionLayout->setContentsMargins(0, 0, 0, 0);
+    actionLayout->setSpacing(14);
+
+    m_previewToggleButton = new QPushButton(tr("Start Preview"), actionRow);
+    m_previewToggleButton->setObjectName("primaryAction");
+    m_previewToggleButton->setCheckable(true);
+    connect(m_previewToggleButton, &QPushButton::toggled,
+            this, &MainWindow::onTogglePreview);
+    actionLayout->addWidget(m_previewToggleButton, 1);
+
+    m_reconnectButton = new QPushButton(tr("Reconnect"), actionRow);
+    m_reconnectButton->setObjectName("secondaryAction");
+    connect(m_reconnectButton, &QPushButton::clicked, this, [this]() {
+        m_controller->disconnectFromCamera();
+        m_controller->connectToCamera();
+    });
+    actionLayout->addWidget(m_reconnectButton);
+    statusLayout->addWidget(actionRow);
+
     scrollLayout->addWidget(m_statusBanner);
 
     // Camera selector (hidden when only one OBSBOT is present)
@@ -379,29 +401,6 @@ void MainWindow::setupUI()
         scrollLayout->addWidget(selectorRow);
     }
     populateCameraSelector();
-
-    QWidget *actionRow = new QWidget(scrollContent);
-    actionRow->setObjectName("actionRow");
-    QHBoxLayout *actionLayout = new QHBoxLayout(actionRow);
-    actionLayout->setContentsMargins(0, 0, 0, 0);
-    actionLayout->setSpacing(14);
-
-    m_previewToggleButton = new QPushButton(tr("Start Preview"), actionRow);
-    m_previewToggleButton->setObjectName("primaryAction");
-    m_previewToggleButton->setCheckable(true);
-    connect(m_previewToggleButton, &QPushButton::toggled,
-            this, &MainWindow::onTogglePreview);
-    actionLayout->addWidget(m_previewToggleButton, 1);
-
-    m_reconnectButton = new QPushButton(tr("Reconnect"), actionRow);
-    m_reconnectButton->setObjectName("secondaryAction");
-    connect(m_reconnectButton, &QPushButton::clicked, this, [this]() {
-        m_controller->disconnectFromCamera();
-        m_controller->connectToCamera();
-    });
-    actionLayout->addWidget(m_reconnectButton);
-
-    scrollLayout->addWidget(actionRow);
 
     m_trackingWidget = new TrackingControlWidget(m_controller, this);
     m_ptzWidget = new PTZControlWidget(m_controller, this);
@@ -1055,9 +1054,9 @@ void MainWindow::onCameraConnected(const CameraController::CameraInfo &info)
 {
     QString deviceText;
     if (info.version.isEmpty()) {
-        deviceText = QString("✓ Connected:\n%1").arg(info.name);
+        deviceText = info.name;
     } else {
-        deviceText = QString("✓ Connected:\n%1\n(v%2)")
+        deviceText = QString("%1\n(v%2)")
             .arg(info.name)
             .arg(info.version);
     }

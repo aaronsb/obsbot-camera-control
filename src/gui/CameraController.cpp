@@ -567,28 +567,10 @@ bool CameraController::setFOV(int fovMode)
     });
     if (success) {
         m_currentState.fovMode = fovMode;
-        float zoom = m_currentState.zoom;
-        if (m_device->cameraGetZoomAbsoluteR(zoom) == 0
-                && zoom >= 1.0f && zoom <= 2.0f) {
-            m_currentState.zoom = zoom;
-            m_currentState.zoomRatio = qRound(zoom * 100.0f);
-        }
+        static constexpr double presetZoom[] = {1.00, 1.05, 1.15};
+        m_currentState.zoom = presetZoom[fovMode];
+        m_currentState.zoomRatio = qRound(m_currentState.zoom * 100.0);
         emit stateChanged(m_currentState);
-
-        // Tiny/Tiny 4K apply named FOV presets asynchronously. The immediate
-        // getter above can still return the previous zoom, so read it again
-        // after both the camera movement and UI command debounce have settled.
-        QTimer::singleShot(1100, this, [this, fovMode]() {
-            if (!m_connected || m_v4l2Only || m_currentState.fovMode != fovMode)
-                return;
-            float settledZoom = m_currentState.zoom;
-            if (m_device->cameraGetZoomAbsoluteR(settledZoom) == 0
-                    && settledZoom >= 1.0f && settledZoom <= 2.0f) {
-                m_currentState.zoom = settledZoom;
-                m_currentState.zoomRatio = qRound(settledZoom * 100.0f);
-                emit stateChanged(m_currentState);
-            }
-        });
     }
     return success;
 }
@@ -1083,14 +1065,20 @@ void CameraController::updateState()
 
     m_currentState.aiMode = status.tiny.ai_mode;
     m_currentState.aiSubMode = status.tiny.ai_sub_mode;
-    // Tiny/Tiny 4K report zoom_ratio as 0..100, not 100..200. The normalized
-    // getter is supported across the OBSBOT product families and avoids
-    // interpreting product-specific status layouts.
-    float zoom = 1.0f;
-    if (m_device->cameraGetZoomAbsoluteR(zoom) == 0 &&
-        zoom >= 1.0f && zoom <= 2.0f) {
-        m_currentState.zoom = zoom;
-        m_currentState.zoomRatio = qRound(zoom * 100.0f);
+    // Tiny/Tiny 4K firmware 1.2.6.2 returns 2.0 from the normalized getter
+    // regardless of the actual zoom. Its status field reliably reports a
+    // 0..100 offset from 1.0x instead.
+    if (isOriginalTinyFamily() && status.tiny.zoom_ratio <= 100) {
+        m_currentState.zoom = 1.0
+            + static_cast<double>(status.tiny.zoom_ratio) / 100.0;
+        m_currentState.zoomRatio = qRound(m_currentState.zoom * 100.0);
+    } else {
+        float zoom = 1.0f;
+        if (m_device->cameraGetZoomAbsoluteR(zoom) == 0
+                && zoom >= 1.0f && zoom <= 2.0f) {
+            m_currentState.zoom = zoom;
+            m_currentState.zoomRatio = qRound(zoom * 100.0f);
+        }
     }
     m_currentState.hdrEnabled = status.tiny.hdr;
     m_currentState.faceAEEnabled = status.tiny.face_ae;

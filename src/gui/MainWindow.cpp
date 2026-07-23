@@ -1061,7 +1061,7 @@ void MainWindow::onCameraConnected(const CameraController::CameraInfo &info)
     if (info.version.isEmpty()) {
         deviceText = info.name;
     } else {
-        deviceText = QString("%1\n(v%2)")
+        deviceText = QString("%1 (v%2)")
             .arg(info.name)
             .arg(info.version);
     }

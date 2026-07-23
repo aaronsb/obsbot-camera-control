@@ -180,7 +180,7 @@ TrackingControlWidget::TrackingControlWidget(CameraController *controller, QWidg
     leftColumn->addWidget(m_invertControlsCheckBox);
 
     // Mirror checkbox — syncs with Creative FX horizontal flip
-    m_mirrorCheckBox = new QCheckBox(tr("Mirror view"), this);
+    m_mirrorCheckBox = new QCheckBox(tr("Mirror preview / virtual camera"), this);
     m_mirrorCheckBox->setStyleSheet("font-size: 10px;");
     connect(m_mirrorCheckBox, &QCheckBox::toggled, this, [this](bool checked) {
         emit mirrorToggled(checked);

@@ -149,7 +149,7 @@ CameraSettingsWidget::CameraSettingsWidget(CameraController *controller, QWidget
         m_controller->setGestureControl(1, enabled);
     });
     deviceLayout->addWidget(gestureZoom);
-    QCheckBox *hardwareMirror = new QCheckBox("Hardware Horizontal Flip", this);
+    QCheckBox *hardwareMirror = new QCheckBox("Flip camera output (hardware)", this);
     connect(hardwareMirror, &QCheckBox::toggled, this, [this](bool enabled) {
         m_controller->setHardwareMirror(enabled);
     });

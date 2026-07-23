@@ -194,7 +194,8 @@ VideoEffectsWidget::VideoEffectsWidget(QWidget *parent)
     QVBoxLayout *orientationLayout = new QVBoxLayout(orientationGroup);
     orientationLayout->setSpacing(6);
 
-    m_horizontalFlipCheckBox = new QCheckBox(tr("Mirror (horizontal flip)"), orientationGroup);
+    m_horizontalFlipCheckBox = new QCheckBox(
+        tr("Mirror preview / virtual camera"), orientationGroup);
     m_horizontalFlipCheckBox->setChecked(m_settings.horizontalFlip);
     connect(m_horizontalFlipCheckBox, &QCheckBox::toggled, this, [this](bool checked) {
         m_settings.horizontalFlip = checked;

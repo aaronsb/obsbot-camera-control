@@ -33,9 +33,11 @@ TrackingControlWidget::TrackingControlWidget(CameraController *controller, QWidg
     groupLayout->setContentsMargins(16, 16, 16, 16);
     groupLayout->setSpacing(12);
 
-    m_trackingCheckBox = new QCheckBox("Enable Auto-Framing", this);
+    m_trackingCheckBox = new QPushButton("Enable Auto-Framing", this);
+    m_trackingCheckBox->setCheckable(true);
     m_trackingCheckBox->setStyleSheet("font-weight: 600; font-size: 14px;");
-    connect(m_trackingCheckBox, &QCheckBox::toggled, this, &TrackingControlWidget::onTrackingToggled);
+    connect(m_trackingCheckBox, &QPushButton::toggled,
+            this, &TrackingControlWidget::onTrackingToggled);
     groupLayout->addWidget(m_trackingCheckBox);
 
     m_originalTinyContainer = new QWidget(this);
@@ -286,6 +288,8 @@ void TrackingControlWidget::setAudioAutoGain(bool enabled)
 void TrackingControlWidget::onTrackingToggled(bool checked)
 {
     m_userInitiated = true;
+    m_trackingCheckBox->setText(checked
+        ? "Disable Auto-Framing" : "Enable Auto-Framing");
 
     if (m_tiny2Capabilities) {
         int modeValue = m_modeCombo->currentData().toInt();
@@ -308,6 +312,9 @@ void TrackingControlWidget::onTrackingToggled(bool checked)
     }
 
     m_controller->enableAutoFraming(checked);
+    setFaceFocusEnabled(checked);
+    m_controller->setFaceFocus(checked);
+    m_controller->setFaceAE(checked);
 
     // Update PTZ controls state (disable when auto-framing is on)
     updatePTZControlsState();
@@ -335,6 +342,8 @@ void TrackingControlWidget::updateFromState(const CameraController::CameraState 
         m_trackingCheckBox->setChecked(shouldBeChecked);
         m_trackingCheckBox->blockSignals(false);
     }
+    m_trackingCheckBox->setText(m_trackingCheckBox->isChecked()
+        ? "Disable Auto-Framing" : "Enable Auto-Framing");
 
     if (!m_userInitiated && !commandInFlight && !isSettling) {
         updatePTZControlsState();

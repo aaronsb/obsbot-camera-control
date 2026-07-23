@@ -32,6 +32,8 @@ public:
     void setTrackingEnabled(bool enabled) {
         m_trackingCheckBox->blockSignals(true);
         m_trackingCheckBox->setChecked(enabled);
+        m_trackingCheckBox->setText(enabled
+            ? "Disable Auto-Framing" : "Enable Auto-Framing");
         m_trackingCheckBox->blockSignals(false);
     }
     void setAiMode(int mode);
@@ -67,7 +69,7 @@ private slots:
 
 private:
     CameraController *m_controller;
-    QCheckBox *m_trackingCheckBox;
+    QPushButton *m_trackingCheckBox;
     QComboBox *m_modeCombo;
     QComboBox *m_humanSubModeCombo;
     QCheckBox *m_autoZoomCheckBox;

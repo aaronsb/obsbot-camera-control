@@ -79,6 +79,8 @@ public:
 
         // Application settings
         bool startMinimized;  // Start application minimized to tray
+        bool invertGimbalX;
+        bool invertGimbalY;
         bool virtualCameraEnabled;
         std::string virtualCameraDevice;
         std::string virtualCameraResolution;

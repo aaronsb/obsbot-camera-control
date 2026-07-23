@@ -170,9 +170,9 @@ TrackingControlWidget::TrackingControlWidget(CameraController *controller, QWidg
     zoomGroupLayout->addLayout(fovLayout);
 
     // Focus remains available while auto-framing is enabled.
-    QGroupBox *focusGroupBox = new QGroupBox("Focus", this);
-    focusGroupBox->setFlat(true);
-    QVBoxLayout *focusGroupLayout = new QVBoxLayout(focusGroupBox);
+    m_focusGroupBox = new QGroupBox("Focus", this);
+    m_focusGroupBox->setFlat(true);
+    QVBoxLayout *focusGroupLayout = new QVBoxLayout(m_focusGroupBox);
     focusGroupLayout->setContentsMargins(16, 16, 16, 16);
     focusGroupLayout->setSpacing(8);
 
@@ -194,7 +194,7 @@ TrackingControlWidget::TrackingControlWidget(CameraController *controller, QWidg
     m_focusLabel->setMinimumWidth(40);
     focusLayout->addWidget(m_focusLabel);
     focusGroupLayout->addLayout(focusLayout);
-    layout->addWidget(focusGroupBox);
+    layout->addWidget(m_focusGroupBox);
 
     // Manual pan/tilt controls (disabled when auto-framing is enabled)
     m_ptzContainer = new QWidget(this);
@@ -212,10 +212,21 @@ TrackingControlWidget::TrackingControlWidget(CameraController *controller, QWidg
     QHBoxLayout *columnsLayout = new QHBoxLayout();
     columnsLayout->setSpacing(16);
 
-    // Invert controls checkbox
-    m_invertControlsCheckBox = new QCheckBox(tr("Invert controls"), this);
-    m_invertControlsCheckBox->setStyleSheet("font-size: 10px;");
-    ptzGroupLayout->addWidget(m_invertControlsCheckBox);
+    m_gimbalControlGroup = new QGroupBox(tr("Gimbal Control"), this);
+    QVBoxLayout *gimbalSettingsLayout =
+        new QVBoxLayout(m_gimbalControlGroup);
+    gimbalSettingsLayout->setContentsMargins(16, 16, 16, 16);
+    m_invertXCheckBox = new QCheckBox(tr("Invert X"), m_gimbalControlGroup);
+    m_invertYCheckBox = new QCheckBox(tr("Invert Y"), m_gimbalControlGroup);
+    gimbalSettingsLayout->addWidget(m_invertXCheckBox);
+    gimbalSettingsLayout->addWidget(m_invertYCheckBox);
+    auto emitInversion = [this]() {
+        emit invertControlsChanged(
+            m_invertXCheckBox->isChecked(),
+            m_invertYCheckBox->isChecked());
+    };
+    connect(m_invertXCheckBox, &QCheckBox::toggled, this, emitInversion);
+    connect(m_invertYCheckBox, &QCheckBox::toggled, this, emitInversion);
 
     // Centered XY pad for pan/tilt
     m_xyPad = new XYPad(this);
@@ -255,6 +266,14 @@ void TrackingControlWidget::setPositionPresetsWidget(QWidget *widget)
     if (auto *pageLayout = qobject_cast<QVBoxLayout*>(layout())) {
         pageLayout->insertWidget(0, widget);
     }
+}
+
+void TrackingControlWidget::setInvertControls(bool invertX, bool invertY)
+{
+    QSignalBlocker blockX(m_invertXCheckBox);
+    QSignalBlocker blockY(m_invertYCheckBox);
+    m_invertXCheckBox->setChecked(invertX);
+    m_invertYCheckBox->setChecked(invertY);
 }
 
 void TrackingControlWidget::setAiMode(int mode)
@@ -458,10 +477,8 @@ void TrackingControlWidget::updateFromState(const CameraController::CameraState 
         float padX = state.pan;
         float padY = state.tilt;
         // XY pad shows control position, so invert back when invert is active
-        if (m_invertControlsCheckBox->isChecked()) {
-            padX = -padX;
-            padY = -padY;
-        }
+        if (m_invertXCheckBox->isChecked()) padX = -padX;
+        if (m_invertYCheckBox->isChecked()) padY = -padY;
         m_xyPad->setPosition(padX, padY);
         m_positionLabel->setText(QString("Position: Pan %1, Tilt %2")
             .arg(state.pan, 0, 'f', 2)
@@ -583,7 +600,6 @@ void TrackingControlWidget::updatePTZControlsState()
     // Disable PTZ controls when auto-framing is enabled
     bool enabled = !m_trackingCheckBox->isChecked();
     m_xyPad->setEnabled(enabled);
-    m_invertControlsCheckBox->setEnabled(enabled);
     m_positionLabel->setEnabled(enabled);
     m_originalTinyContainer->setEnabled(!enabled);
 }
@@ -616,10 +632,8 @@ void TrackingControlWidget::scheduleFlush()
 
 void TrackingControlWidget::onXYPadChanged(float x, float y)
 {
-    if (m_invertControlsCheckBox->isChecked()) {
-        x = -x;
-        y = -y;
-    }
+    if (m_invertXCheckBox->isChecked()) x = -x;
+    if (m_invertYCheckBox->isChecked()) y = -y;
 
     m_pendingPan = x;
     m_pendingTilt = y;

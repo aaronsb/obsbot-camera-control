@@ -28,6 +28,7 @@ public:
         m_settingsWidget = settingsWidget;
     }
     QGroupBox *positionPresetsGroup() const { return m_positionPresetGroup; }
+    QGroupBox *imagePresetsGroup() const { return m_imagePresetGroup; }
 
     struct PresetState {
         bool defined;
@@ -66,12 +67,13 @@ private slots:
     void onRecallPreset();
     void showPresetMenu(const QPoint &position);
     void onRecallImagePreset();
-    void onStoreImagePreset();
+    void showImagePresetMenu(const QPoint &position);
 
 private:
     CameraController *m_controller;
     CameraSettingsWidget *m_settingsWidget;
     QGroupBox *m_positionPresetGroup;
+    QGroupBox *m_imagePresetGroup;
 
     struct PresetUi {
         QPushButton *recallButton;
@@ -86,8 +88,9 @@ private:
 
     struct ImagePresetUi {
         QPushButton *recallButton;
-        QPushButton *saveButton;
-        QLabel *statusLabel;
+        QLineEdit *renameEditor;
+        QStackedWidget *stack;
+        QString name;
         ImagePresetState state;
     };
 
@@ -99,6 +102,9 @@ private:
     void deletePreset(int index);
     void beginPresetRename(int index);
     void updateImagePresetLabel(int index);
+    void storeImagePreset(int index);
+    void deleteImagePreset(int index);
+    void beginImagePresetRename(int index);
 };
 
 #endif // PTZCONTROLWIDGET_H

@@ -66,6 +66,8 @@ void Config::setDefaults()
 
     // Application settings
     m_settings.startMinimized = false;
+    m_settings.invertGimbalX = false;
+    m_settings.invertGimbalY = false;
     m_settings.virtualCameraEnabled = false;
     m_settings.virtualCameraDevice = "/dev/video42";
     m_settings.virtualCameraResolution = "match";
@@ -199,7 +201,9 @@ bool Config::load(std::vector<ValidationError> &errors)
         "virtual_camera_resolution",
         "white_balance_kelvin",
         "focus",
-        "snapshot_directory"
+        "snapshot_directory",
+        "invert_gimbal_x",
+        "invert_gimbal_y"
     };
 
     auto isPresetKey = [](const std::string &key) -> bool {
@@ -595,6 +599,16 @@ bool Config::parseLine(const std::string &line, int lineNumber, std::vector<Vali
             addError(InvalidValue, "start_minimized must be true/false or enabled/disabled");
             return false;
         }
+    } else if (key == "invert_gimbal_x") {
+        if (!parseBool(value, m_settings.invertGimbalX)) {
+            addError(InvalidValue, "invert_gimbal_x must be true/false or enabled/disabled");
+            return false;
+        }
+    } else if (key == "invert_gimbal_y") {
+        if (!parseBool(value, m_settings.invertGimbalY)) {
+            addError(InvalidValue, "invert_gimbal_y must be true/false or enabled/disabled");
+            return false;
+        }
     } else if (key == "virtual_camera_enabled") {
         if (!parseBool(value, m_settings.virtualCameraEnabled)) {
             addError(InvalidValue, "virtual_camera_enabled must be true/false or enabled/disabled");
@@ -877,6 +891,8 @@ bool Config::save()
     file << "# Application Settings\n";
     file << "# Start application minimized to system tray\n";
     file << "start_minimized=" << (m_settings.startMinimized ? "enabled" : "disabled") << "\n";
+    file << "invert_gimbal_x=" << (m_settings.invertGimbalX ? "enabled" : "disabled") << "\n";
+    file << "invert_gimbal_y=" << (m_settings.invertGimbalY ? "enabled" : "disabled") << "\n";
 
     file << "\n# Virtual camera output\n";
     file << "virtual_camera_enabled=" << (m_settings.virtualCameraEnabled ? "enabled" : "disabled") << "\n";

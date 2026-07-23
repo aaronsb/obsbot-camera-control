@@ -306,7 +306,7 @@ void MainWindow::setupUI()
     m_previewStack->addWidget(m_previewPlaceholder);
     m_previewStack->setCurrentWidget(m_previewPlaceholder);
 
-    // Control column (scrollable so window can be smaller)
+    // Control column: status and tab bar stay fixed; each tab scrolls itself.
     m_controlCard = new QFrame(m_splitter);
     m_controlCard->setObjectName("controlCard");
     m_controlCard->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Expanding);
@@ -316,14 +316,7 @@ void MainWindow::setupUI()
     controlLayout->setContentsMargins(0, 0, 0, 0);
     controlLayout->setSpacing(0);
 
-    QScrollArea *controlScroll = new QScrollArea(m_controlCard);
-    controlScroll->setObjectName("controlScroll");
-    controlScroll->setWidgetResizable(true);
-    controlScroll->setFrameShape(QFrame::NoFrame);
-    controlScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    controlScroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
-
-    QWidget *scrollContent = new QWidget(controlScroll);
+    QWidget *scrollContent = new QWidget(m_controlCard);
     scrollContent->setMinimumWidth(0);  // allow shrinking to viewport so content is not clipped
     QVBoxLayout *scrollLayout = new QVBoxLayout(scrollContent);
     scrollLayout->setContentsMargins(18, 20, 18, 20);
@@ -423,20 +416,38 @@ void MainWindow::setupUI()
     m_ptzWidget->setCameraSettingsWidget(m_settingsWidget);
     m_trackingWidget->setPositionPresetsWidget(
         m_ptzWidget->positionPresetsGroup());
+    m_settingsWidget->insertTopWidget(m_trackingWidget->focusGroup());
+    m_settingsWidget->insertTopWidget(m_ptzWidget->imagePresetsGroup());
     connect(m_ptzWidget, &PTZControlWidget::presetUpdated,
             this, &MainWindow::onPresetUpdated);
+    connect(m_trackingWidget, &TrackingControlWidget::invertControlsChanged,
+            this, [this](bool invertX, bool invertY) {
+        auto settings = m_controller->getConfig().getSettings();
+        settings.invertGimbalX = invertX;
+        settings.invertGimbalY = invertY;
+        m_controller->getConfig().setSettings(settings);
+        m_controller->saveConfig();
+    });
 
     m_tabWidget = new QTabWidget(scrollContent);
     m_tabWidget->setObjectName("controlTabs");
     m_tabWidget->setDocumentMode(true);
-    m_tabWidget->addTab(m_trackingWidget, tr("Console"));
-    m_tabWidget->addTab(m_ptzWidget, tr("Presets"));
-    m_tabWidget->addTab(m_settingsWidget, tr("Image"));
+    auto addScrollableTab = [this](QWidget *content, const QString &label) {
+        auto *area = new QScrollArea(m_tabWidget);
+        area->setWidgetResizable(true);
+        area->setFrameShape(QFrame::NoFrame);
+        area->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+        area->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+        area->setWidget(content);
+        return m_tabWidget->addTab(area, label);
+    };
+    addScrollableTab(m_trackingWidget, tr("Console"));
+    addScrollableTab(m_settingsWidget, tr("Image"));
     m_effectsWidget = new VideoEffectsWidget(this);
     connect(m_effectsWidget, &VideoEffectsWidget::effectsChanged,
             this, &MainWindow::onVideoEffectsChanged);
-    m_tabWidget->addTab(m_effectsWidget, tr("FX"));
-    scrollLayout->addWidget(m_tabWidget);
+    addScrollableTab(m_effectsWidget, tr("FX"));
+    scrollLayout->addWidget(m_tabWidget, 1);
     m_effectsWidget->reset();
 
     // Resize tab widget to fit the current tab (QTabWidget normally sizes to the tallest)
@@ -510,7 +521,7 @@ void MainWindow::setupUI()
     virtualLayout->addWidget(virtualResolutionHint);
     virtualCameraPageLayout->addWidget(virtualCameraGroup);
     virtualCameraPageLayout->addStretch();
-    m_tabWidget->addTab(virtualCameraPage, tr("Virtual Camera"));
+    addScrollableTab(virtualCameraPage, tr("Virtual Camera"));
 
     QWidget *settingsPage = new QWidget(m_tabWidget);
     QVBoxLayout *settingsPageLayout = new QVBoxLayout(settingsPage);
@@ -545,6 +556,7 @@ void MainWindow::setupUI()
     snapshotLayout->addWidget(snapshotHint);
 
     settingsPageLayout->addWidget(snapshotGroup);
+    settingsPageLayout->addWidget(m_trackingWidget->gimbalControlGroup());
 
     m_startMinimizedCheckbox = new QCheckBox(
         tr("Launch minimized / Close to tray"), settingsPage);
@@ -553,12 +565,9 @@ void MainWindow::setupUI()
             this, &MainWindow::onStartMinimizedToggled);
     settingsPageLayout->addWidget(m_startMinimizedCheckbox);
     settingsPageLayout->addStretch();
-    m_tabWidget->addTab(settingsPage, tr("Settings"));
+    addScrollableTab(settingsPage, tr("Settings"));
 
-    scrollLayout->addStretch();
-
-    controlScroll->setWidget(scrollContent);
-    controlLayout->addWidget(controlScroll);
+    controlLayout->addWidget(scrollContent);
 
     m_splitter->addWidget(m_previewCard);
     m_splitter->addWidget(m_controlCard);
@@ -1151,10 +1160,9 @@ void MainWindow::onStateChanged(const CameraController::CameraState &state)
 
 void MainWindow::fitTabToCurrentPage()
 {
-    QWidget *page = m_tabWidget->currentWidget();
-    if (!page) return;
-    m_tabWidget->setMaximumHeight(
-        page->sizeHint().height() + m_tabWidget->tabBar()->sizeHint().height());
+    m_tabWidget->setMaximumHeight(QWIDGETSIZE_MAX);
+    m_tabWidget->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Expanding);
+    m_tabWidget->updateGeometry();
 }
 
 void MainWindow::onCommandFailed(const QString &description, int errorCode)
@@ -1177,8 +1185,7 @@ void MainWindow::updateStatus()
     if (m_statusTimer->interval() != desiredInterval)
         m_statusTimer->setInterval(desiredInterval);
 
-    const bool imageTabVisible = !background
-        && m_tabWidget->currentWidget() == m_settingsWidget;
+    const bool imageTabVisible = !background && m_settingsWidget->isVisible();
     const bool pollImageControls = imageTabVisible && (++m_pollTick % 4 == 0);
     auto state = m_controller->pollCurrentState(pollImageControls);
 
@@ -1290,6 +1297,8 @@ void MainWindow::loadConfiguration()
     m_trackingWidget->setTrackSpeed(settings.trackSpeed);
     m_trackingWidget->setTrackingStyle(settings.trackingStyle);
     m_trackingWidget->setAudioAutoGain(settings.audioAutoGain);
+    m_trackingWidget->setInvertControls(
+        settings.invertGimbalX, settings.invertGimbalY);
     m_settingsWidget->setHDREnabled(settings.hdr);
     m_settingsWidget->setFOVMode(settings.fov);
     m_settingsWidget->setFaceAEEnabled(settings.faceAE);

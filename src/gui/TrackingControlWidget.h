@@ -29,6 +29,8 @@ public:
     void updateFromState(const CameraController::CameraState &state);
     void setV4l2Mode(bool v4l2Only);
     void setPositionPresetsWidget(QWidget *widget);
+    QGroupBox *focusGroup() const { return m_focusGroupBox; }
+    QGroupBox *gimbalControlGroup() const { return m_gimbalControlGroup; }
     bool isTrackingEnabled() const { return m_trackingCheckBox->isChecked(); }
     void setTrackingEnabled(bool enabled) {
         m_trackingCheckBox->blockSignals(true);
@@ -50,7 +52,12 @@ public:
     bool isAudioAutoGainEnabled() const { return m_audioGainCheckBox->isChecked(); }
     bool isFaceFocusEnabled() const { return m_faceFocusCheckBox->isChecked(); }
     void setFaceFocusEnabled(bool enabled);
-    bool isInvertControls() const { return m_invertControlsCheckBox->isChecked(); }
+    void setInvertControls(bool invertX, bool invertY);
+    bool isInvertX() const { return m_invertXCheckBox->isChecked(); }
+    bool isInvertY() const { return m_invertYCheckBox->isChecked(); }
+
+signals:
+    void invertControlsChanged(bool invertX, bool invertY);
 
 private slots:
     void onTrackingToggled(bool checked);
@@ -85,7 +92,8 @@ private:
 
     // Manual PTZ controls
     XYPad *m_xyPad;
-    QCheckBox *m_invertControlsCheckBox;
+    QCheckBox *m_invertXCheckBox;
+    QCheckBox *m_invertYCheckBox;
     QSlider *m_zoomSlider;
     QLabel *m_zoomLabel;
     QPushButton *m_fovButtons[3];
@@ -111,6 +119,8 @@ private:
     void updatePTZControlsState();
 
     QGroupBox *m_trackingGroupBox;
+    QGroupBox *m_focusGroupBox;
+    QGroupBox *m_gimbalControlGroup;
 };
 
 #endif // TRACKINGCONTROLWIDGET_H

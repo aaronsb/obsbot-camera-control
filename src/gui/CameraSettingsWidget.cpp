@@ -406,6 +406,17 @@ CameraSettingsWidget::CameraSettingsWidget(CameraController *controller, QWidget
     layout->addStretch();
 }
 
+void CameraSettingsWidget::insertTopWidget(QWidget *widget)
+{
+    if (!widget) return;
+    if (QWidget *oldParent = widget->parentWidget()) {
+        if (QLayout *oldLayout = oldParent->layout())
+            oldLayout->removeWidget(widget);
+    }
+    if (auto *pageLayout = qobject_cast<QVBoxLayout*>(layout()))
+        pageLayout->insertWidget(0, widget);
+}
+
 void CameraSettingsWidget::onHDRToggled(bool checked)
 {
     m_userInitiated = true;

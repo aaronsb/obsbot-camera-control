@@ -9,6 +9,7 @@ PTZControlWidget::PTZControlWidget(CameraController *controller, QWidget *parent
     , m_controller(controller)
     , m_settingsWidget(nullptr)
     , m_positionPresetGroup(nullptr)
+    , m_imagePresetGroup(nullptr)
 {
     QVBoxLayout *layout = new QVBoxLayout(this);
     layout->setContentsMargins(8, 8, 8, 14);
@@ -66,42 +67,44 @@ PTZControlWidget::PTZControlWidget(CameraController *controller, QWidget *parent
     layout->addWidget(m_positionPresetGroup);
 
     // Image Quality Presets section
-    QGroupBox *imagePresetGroup = new QGroupBox("Image Quality Presets", this);
-    QVBoxLayout *imagePresetLayout = new QVBoxLayout(imagePresetGroup);
+    m_imagePresetGroup = new QGroupBox("Image Quality Presets", this);
+    QHBoxLayout *imagePresetLayout = new QHBoxLayout(m_imagePresetGroup);
     imagePresetLayout->setContentsMargins(16, 16, 16, 16);
     imagePresetLayout->setSpacing(8);
 
     for (int i = 0; i < 3; ++i) {
         ImagePresetUi imagePresetUi{};
         imagePresetUi.state.defined = false;
-
-        QHBoxLayout *row = new QHBoxLayout();
-        row->setSpacing(8);
-        QLabel *titleLabel = new QLabel(QString("Preset %1").arg(i + 1), this);
-        titleLabel->setStyleSheet("font-weight: 600; font-size: 11px;");
-        row->addWidget(titleLabel);
-
-        imagePresetUi.statusLabel = new QLabel("Empty", this);
-        imagePresetUi.statusLabel->setStyleSheet("color: palette(mid); font-size: 11px;");
-        row->addWidget(imagePresetUi.statusLabel, 1);
-
-        imagePresetUi.recallButton = new QPushButton("Recall", this);
+        imagePresetUi.name = QString::number(i + 1);
+        imagePresetUi.stack = new QStackedWidget(m_imagePresetGroup);
+        imagePresetUi.recallButton =
+            new QPushButton(imagePresetUi.name, imagePresetUi.stack);
         imagePresetUi.recallButton->setProperty("presetIndex", i);
-        imagePresetUi.recallButton->setEnabled(false);
+        imagePresetUi.recallButton->setContextMenuPolicy(Qt::CustomContextMenu);
         connect(imagePresetUi.recallButton, &QPushButton::clicked, this, &PTZControlWidget::onRecallImagePreset);
-        row->addWidget(imagePresetUi.recallButton);
-
-        imagePresetUi.saveButton = new QPushButton("Save", this);
-        imagePresetUi.saveButton->setProperty("presetIndex", i);
-        connect(imagePresetUi.saveButton, &QPushButton::clicked, this, &PTZControlWidget::onStoreImagePreset);
-        row->addWidget(imagePresetUi.saveButton);
-
-        imagePresetLayout->addLayout(row);
+        connect(imagePresetUi.recallButton,
+                &QPushButton::customContextMenuRequested,
+                this, &PTZControlWidget::showImagePresetMenu);
+        imagePresetUi.renameEditor = new QLineEdit(imagePresetUi.stack);
+        imagePresetUi.renameEditor->setAlignment(Qt::AlignCenter);
+        imagePresetUi.renameEditor->setMaxLength(32);
+        imagePresetUi.stack->addWidget(imagePresetUi.recallButton);
+        imagePresetUi.stack->addWidget(imagePresetUi.renameEditor);
+        imagePresetLayout->addWidget(imagePresetUi.stack, 1);
         m_imagePresets[static_cast<size_t>(i)] = imagePresetUi;
+        connect(imagePresetUi.renameEditor, &QLineEdit::editingFinished,
+                this, [this, i]() {
+            auto &preset = m_imagePresets[static_cast<size_t>(i)];
+            if (preset.stack->currentWidget() != preset.renameEditor) return;
+            QString name = preset.renameEditor->text().trimmed();
+            if (!name.isEmpty()) preset.name = name;
+            preset.stack->setCurrentWidget(preset.recallButton);
+            updateImagePresetLabel(i);
+        });
         updateImagePresetLabel(i);
     }
 
-    layout->addWidget(imagePresetGroup);
+    layout->addWidget(m_imagePresetGroup);
     layout->addStretch();
 }
 void PTZControlWidget::applyPresetStates(const std::array<PresetState, 3> &presets)
@@ -252,21 +255,16 @@ void PTZControlWidget::updatePresetLabel(int index)
             : QString("color: palette(mid); background-color: palette(midlight);"));
     // Hardware-backed models can save a real gimbal position while reporting
     // zero for absolute pan/tilt, so do not present cached coordinates as fact.
-    preset.recallButton->setToolTip(
-        preset.defined ? "Saved camera preset" : "Empty preset");
+    preset.recallButton->setToolTip(preset.defined
+        ? "Right click to change"
+        : "Right click to set");
 }
 
-void PTZControlWidget::onStoreImagePreset()
+void PTZControlWidget::storeImagePreset(int index)
 {
     if (!m_settingsWidget) {
         return;
     }
-
-    auto *button = qobject_cast<QPushButton*>(sender());
-    if (!button) {
-        return;
-    }
-    int index = button->property("presetIndex").toInt();
     if (index < 0 || index >= static_cast<int>(m_imagePresets.size())) {
         return;
     }
@@ -288,6 +286,49 @@ void PTZControlWidget::onStoreImagePreset()
     updateImagePresetLabel(index);
 
     emit imagePresetUpdated(index);
+}
+
+void PTZControlWidget::deleteImagePreset(int index)
+{
+    if (index < 0 || index >= static_cast<int>(m_imagePresets.size())) return;
+    auto &preset = m_imagePresets[static_cast<size_t>(index)];
+    preset.state.defined = false;
+    preset.name = QString::number(index + 1);
+    updateImagePresetLabel(index);
+    emit imagePresetUpdated(index);
+}
+
+void PTZControlWidget::beginImagePresetRename(int index)
+{
+    if (index < 0 || index >= static_cast<int>(m_imagePresets.size())) return;
+    auto &preset = m_imagePresets[static_cast<size_t>(index)];
+    preset.renameEditor->setText(preset.name);
+    preset.stack->setCurrentWidget(preset.renameEditor);
+    preset.renameEditor->setFocus();
+    preset.renameEditor->selectAll();
+}
+
+void PTZControlWidget::showImagePresetMenu(const QPoint &position)
+{
+    auto *button = qobject_cast<QPushButton*>(sender());
+    if (!button) return;
+    const int index = button->property("presetIndex").toInt();
+    if (index < 0 || index >= static_cast<int>(m_imagePresets.size())) return;
+    const auto &preset = m_imagePresets[static_cast<size_t>(index)];
+    QMenu menu(this);
+    if (!preset.state.defined) {
+        QAction *setAction = menu.addAction("Set");
+        if (menu.exec(button->mapToGlobal(position)) == setAction)
+            storeImagePreset(index);
+        return;
+    }
+    QAction *updateAction = menu.addAction("Update");
+    QAction *deleteAction = menu.addAction("Delete");
+    QAction *renameAction = menu.addAction("Rename");
+    QAction *selected = menu.exec(button->mapToGlobal(position));
+    if (selected == updateAction) storeImagePreset(index);
+    else if (selected == deleteAction) deleteImagePreset(index);
+    else if (selected == renameAction) beginImagePresetRename(index);
 }
 
 void PTZControlWidget::onRecallImagePreset()
@@ -330,19 +371,16 @@ void PTZControlWidget::updateImagePresetLabel(int index)
         return;
     }
     auto &preset = m_imagePresets[static_cast<size_t>(index)];
-    if (!preset.statusLabel) {
+    if (!preset.recallButton) {
         return;
     }
-
-    if (preset.state.defined) {
-        preset.statusLabel->setText("Saved");
-    } else {
-        preset.statusLabel->setText("Empty");
-    }
-
-    if (preset.recallButton) {
-        preset.recallButton->setEnabled(preset.state.defined);
-    }
+    preset.recallButton->setText(preset.name);
+    preset.recallButton->setStyleSheet(preset.state.defined
+        ? QString()
+        : QString("color: palette(mid); background-color: palette(midlight);"));
+    preset.recallButton->setToolTip(preset.state.defined
+        ? "Right click to change"
+        : "Right click to set");
 }
 
 void PTZControlWidget::applyImagePresetStates(const std::array<ImagePresetState, 3> &presets)

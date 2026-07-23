@@ -238,6 +238,7 @@ void FilterPreviewWidget::initializeGL()
 
     ensureProgram();
     ensureGeometry();
+    m_glResourcesCleaned = false;
 }
 
 void FilterPreviewWidget::resizeGL(int w, int h)
@@ -450,6 +451,10 @@ QSizeF FilterPreviewWidget::frameAspectSize() const
 
 void FilterPreviewWidget::cleanupGLResources()
 {
+    if (m_glResourcesCleaned) {
+        return;
+    }
+
     if (m_texture) {
         m_texture->destroy();
         m_texture.reset();
@@ -465,17 +470,24 @@ void FilterPreviewWidget::cleanupGLResources()
     }
     m_program.reset();
     m_geometryInitialized = false;
+    m_glResourcesCleaned = true;
 }
 
 void FilterPreviewWidget::handleContextAboutToBeDestroyed()
 {
-    if (!isValid()) {
+    QOpenGLContext *glContext = context();
+    if (!glContext || m_glResourcesCleaned) {
         return;
     }
 
     makeCurrent();
+    if (QOpenGLContext::currentContext() != glContext) {
+        return;
+    }
     cleanupGLResources();
     doneCurrent();
+    disconnect(glContext, &QOpenGLContext::aboutToBeDestroyed,
+               this, &FilterPreviewWidget::handleContextAboutToBeDestroyed);
 }
 
 void FilterPreviewWidget::applyEffectsUniforms()

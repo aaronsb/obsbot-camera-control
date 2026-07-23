@@ -112,6 +112,15 @@ CameraSettingsWidget::CameraSettingsWidget(CameraController *controller, QWidget
     m_brightnessSlider->setToolTip("Adjust image brightness (0-255)");
     connect(m_brightnessSlider, &QSlider::valueChanged, this, &CameraSettingsWidget::onBrightnessChanged);
     brightnessLayout->addWidget(m_brightnessSlider);
+    QPushButton *brightnessReset = new QPushButton("Reset", this);
+    connect(brightnessReset, &QPushButton::clicked, this, [this]() {
+        const auto range = m_controller->getBrightnessRange();
+        const int value = range.valid ? range.defaultValue : 50;
+        m_controller->setBrightnessAuto(false);
+        setBrightness(value);
+        m_controller->setBrightness(value);
+    });
+    brightnessLayout->addWidget(brightnessReset);
     imageLayout->addLayout(brightnessLayout);
 
     // Contrast
@@ -127,6 +136,15 @@ CameraSettingsWidget::CameraSettingsWidget(CameraController *controller, QWidget
     m_contrastSlider->setToolTip("Adjust image contrast (0-255)");
     connect(m_contrastSlider, &QSlider::valueChanged, this, &CameraSettingsWidget::onContrastChanged);
     contrastLayout->addWidget(m_contrastSlider);
+    QPushButton *contrastReset = new QPushButton("Reset", this);
+    connect(contrastReset, &QPushButton::clicked, this, [this]() {
+        const auto range = m_controller->getContrastRange();
+        const int value = range.valid ? range.defaultValue : 50;
+        m_controller->setContrastAuto(false);
+        setContrast(value);
+        m_controller->setContrast(value);
+    });
+    contrastLayout->addWidget(contrastReset);
     imageLayout->addLayout(contrastLayout);
 
     // Saturation
@@ -142,6 +160,15 @@ CameraSettingsWidget::CameraSettingsWidget(CameraController *controller, QWidget
     m_saturationSlider->setToolTip("Adjust color saturation (0-255)");
     connect(m_saturationSlider, &QSlider::valueChanged, this, &CameraSettingsWidget::onSaturationChanged);
     saturationLayout->addWidget(m_saturationSlider);
+    QPushButton *saturationReset = new QPushButton("Reset", this);
+    connect(saturationReset, &QPushButton::clicked, this, [this]() {
+        const auto range = m_controller->getSaturationRange();
+        const int value = range.valid ? range.defaultValue : 50;
+        m_controller->setSaturationAuto(false);
+        setSaturation(value);
+        m_controller->setSaturation(value);
+    });
+    saturationLayout->addWidget(saturationReset);
     imageLayout->addLayout(saturationLayout);
 
     QHBoxLayout *hueLayout = new QHBoxLayout();
@@ -150,6 +177,16 @@ CameraSettingsWidget::CameraSettingsWidget(CameraController *controller, QWidget
     m_hueSlider->setRange(0, 100);
     connect(m_hueSlider, &QSlider::valueChanged, this, &CameraSettingsWidget::onHueChanged);
     hueLayout->addWidget(m_hueSlider);
+    QPushButton *hueReset = new QPushButton("Reset", this);
+    connect(hueReset, &QPushButton::clicked, this, [this]() {
+        const auto range = m_controller->getHueRange();
+        const int value = range.valid ? range.defaultValue : 50;
+        m_hueSlider->blockSignals(true);
+        m_hueSlider->setValue(value);
+        m_hueSlider->blockSignals(false);
+        m_controller->setHue(value);
+    });
+    hueLayout->addWidget(hueReset);
     imageLayout->addLayout(hueLayout);
 
     QHBoxLayout *sharpnessLayout = new QHBoxLayout();
@@ -159,6 +196,16 @@ CameraSettingsWidget::CameraSettingsWidget(CameraController *controller, QWidget
     connect(m_sharpnessSlider, &QSlider::valueChanged,
             this, &CameraSettingsWidget::onSharpnessChanged);
     sharpnessLayout->addWidget(m_sharpnessSlider);
+    QPushButton *sharpnessReset = new QPushButton("Reset", this);
+    connect(sharpnessReset, &QPushButton::clicked, this, [this]() {
+        const auto range = m_controller->getSharpnessRange();
+        const int value = range.valid ? range.defaultValue : 50;
+        m_sharpnessSlider->blockSignals(true);
+        m_sharpnessSlider->setValue(value);
+        m_sharpnessSlider->blockSignals(false);
+        m_controller->setSharpness(value);
+    });
+    sharpnessLayout->addWidget(sharpnessReset);
     imageLayout->addLayout(sharpnessLayout);
 
     // White Balance
@@ -178,6 +225,16 @@ CameraSettingsWidget::CameraSettingsWidget(CameraController *controller, QWidget
     connect(m_whiteBalanceComboBox, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, &CameraSettingsWidget::onWhiteBalanceChanged);
     wbLayout->addWidget(m_whiteBalanceComboBox);
+    QPushButton *whiteBalanceReset = new QPushButton("Reset", this);
+    connect(whiteBalanceReset, &QPushButton::clicked, this, [this]() {
+        const int mode = static_cast<int>(Device::DevWhiteBalanceAuto);
+        setWhiteBalance(mode);
+        const auto range = m_controller->getWhiteBalanceKelvinRange();
+        if (range.valid)
+            setWhiteBalanceKelvin(range.defaultValue);
+        m_controller->setWhiteBalance(mode);
+    });
+    wbLayout->addWidget(whiteBalanceReset);
     wbLayout->addStretch();
     imageLayout->addLayout(wbLayout);
 

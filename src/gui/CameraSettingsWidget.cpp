@@ -54,8 +54,9 @@ CameraSettingsWidget::CameraSettingsWidget(CameraController *controller, QWidget
     groupLayout->addWidget(m_faceFocusCheckBox);
 
     QHBoxLayout *exposureLayout = new QHBoxLayout();
-    m_exposureAutoCheckBox = new QCheckBox("Auto Exposure", this);
-    m_exposureAutoCheckBox->setToolTip("Continuously adapt exposure to changing light");
+    m_exposureAutoCheckBox = new QCheckBox("Adaptive Exposure", this);
+    m_exposureAutoCheckBox->setToolTip(
+        "Use the Tiny 4K's supported shutter-priority mode to adapt gain to changing light");
     connect(m_exposureAutoCheckBox, &QCheckBox::toggled,
             this, &CameraSettingsWidget::onExposureAutoToggled);
     exposureLayout->addWidget(m_exposureAutoCheckBox);

@@ -13,6 +13,10 @@ CameraSettingsWidget::CameraSettingsWidget(CameraController *controller, QWidget
     // Create debounce timer for command completion
     m_commandTimer = new QTimer(this);
     m_commandTimer->setSingleShot(true);
+    connect(m_commandTimer, &QTimer::timeout, this, [this]() {
+        if (m_controller->isConnected())
+            m_controller->saveConfig();
+    });
     QVBoxLayout *layout = new QVBoxLayout(this);
     layout->setContentsMargins(8, 14, 8, 14);
     layout->setSpacing(14);

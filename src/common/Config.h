@@ -61,6 +61,9 @@ public:
         int contrast;         // Typically 0-255 or similar range
         bool saturationAuto;  // Auto mode for saturation
         int saturation;       // Typically 0-255 or similar range
+        int hue;
+        int sharpness;
+        int antiFlicker;
         int whiteBalance;     // 0=Auto, 1=Daylight, 2=Fluorescent, etc.
         int whiteBalanceKelvin; // Manual Kelvin value (when whiteBalance==255)
         int focus;            // Manual focus position (0-100, -1 = auto)

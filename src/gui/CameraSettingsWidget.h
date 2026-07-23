@@ -37,6 +37,9 @@ public:
     int getContrast() const { return m_contrastSlider->value(); }
     bool isSaturationAuto() const { return false; }
     int getSaturation() const { return m_saturationSlider->value(); }
+    int getHue() const { return m_hueSlider->value(); }
+    int getSharpness() const { return m_sharpnessSlider->value(); }
+    int getAntiFlicker() const { return m_antiFlickerComboBox->currentData().toInt(); }
     int getWhiteBalance() const { return m_whiteBalanceComboBox->currentData().toInt(); }
     int getWhiteBalanceKelvin() const { return m_whiteBalanceKelvinSlider->value(); }
 
@@ -96,6 +99,24 @@ public:
         m_saturationSlider->blockSignals(true);
         m_saturationSlider->setValue(value);
         m_saturationSlider->blockSignals(false);
+    }
+    void setHue(int value) {
+        m_hueSlider->blockSignals(true);
+        m_hueSlider->setValue(value);
+        m_hueSlider->blockSignals(false);
+    }
+    void setSharpness(int value) {
+        m_sharpnessSlider->blockSignals(true);
+        m_sharpnessSlider->setValue(value);
+        m_sharpnessSlider->blockSignals(false);
+    }
+    void setAntiFlicker(int value) {
+        int index = m_antiFlickerComboBox->findData(value);
+        if (index >= 0) {
+            m_antiFlickerComboBox->blockSignals(true);
+            m_antiFlickerComboBox->setCurrentIndex(index);
+            m_antiFlickerComboBox->blockSignals(false);
+        }
     }
     void setWhiteBalance(int value) {
         m_whiteBalanceComboBox->blockSignals(true);

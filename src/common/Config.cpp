@@ -43,6 +43,9 @@ void Config::setDefaults()
     m_settings.contrast = 128;
     m_settings.saturationAuto = true;
     m_settings.saturation = 128;
+    m_settings.hue = 50;
+    m_settings.sharpness = 50;
+    m_settings.antiFlicker = 1;
     m_settings.whiteBalance = 0;      // Auto
     m_settings.whiteBalanceKelvin = 5000;
     m_settings.focus = -1;            // Auto focus
@@ -184,6 +187,10 @@ bool Config::load(std::vector<ValidationError> &errors)
         "ai_sub_mode",
         "auto_zoom",
         "track_speed",
+        "tracking_style",
+        "hue",
+        "sharpness",
+        "anti_flicker",
         "audio_auto_gain",
         "preview_format",
         "virtual_camera_enabled",
@@ -503,6 +510,21 @@ bool Config::parseLine(const std::string &line, int lineNumber, std::vector<Vali
             addError(InvalidValue, "saturation must be an integer between 0 and 255");
             return false;
         }
+    } else if (key == "hue" || key == "sharpness" || key == "anti_flicker") {
+        try {
+            int parsed = std::stoi(value);
+            const int maximum = key == "anti_flicker" ? 3 : 100;
+            if (parsed < 0 || parsed > maximum) {
+                addError(InvalidValue, key + " is out of range");
+                return false;
+            }
+            if (key == "hue") m_settings.hue = parsed;
+            else if (key == "sharpness") m_settings.sharpness = parsed;
+            else m_settings.antiFlicker = parsed;
+        } catch (...) {
+            addError(InvalidValue, key + " must be an integer");
+            return false;
+        }
     } else if (key == "white_balance") {
         if (value == "auto" || value == "0") {
             m_settings.whiteBalance = 0;
@@ -658,6 +680,10 @@ bool Config::validateSettings(std::vector<ValidationError> &errors)
         addError("track_speed out of range (must be 0-5)");
     }
 
+    if (m_settings.trackingStyle < 0 || m_settings.trackingStyle > 2) {
+        addError("tracking_style out of range (must be 0-2)");
+    }
+
     if (m_settings.whiteBalance == 255) {
         if (m_settings.whiteBalanceKelvin != -1 && (m_settings.whiteBalanceKelvin < 2000 || m_settings.whiteBalanceKelvin > 10000)) {
             addError("white_balance_kelvin out of range (must be 2000-10000)");
@@ -798,6 +824,13 @@ bool Config::save()
     file << "saturation_auto=" << (m_settings.saturationAuto ? "enabled" : "disabled") << "\n";
     file << "# Saturation (0-255, default 128)\n";
     file << "saturation=" << m_settings.saturation << "\n\n";
+
+    file << "# Hue and sharpness (camera range is applied at runtime)\n";
+    file << "hue=" << m_settings.hue << "\n";
+    file << "sharpness=" << m_settings.sharpness << "\n\n";
+
+    file << "# Anti-flicker (0=Off,1=50Hz,2=60Hz,3=Auto when supported)\n";
+    file << "anti_flicker=" << m_settings.antiFlicker << "\n\n";
 
     file << "# White Balance (auto/daylight/fluorescent/tungsten/flash/fine/cloudy/shade)\n";
     std::string wbStr;

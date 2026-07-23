@@ -10,6 +10,10 @@ TrackingControlWidget::TrackingControlWidget(CameraController *controller, QWidg
     // Create debounce timer for command completion
     m_commandTimer = new QTimer(this);
     m_commandTimer->setSingleShot(true);
+    connect(m_commandTimer, &QTimer::timeout, this, [this]() {
+        if (m_controller->isConnected())
+            m_controller->saveConfig();
+    });
 
     // Unified throttle for all manual controls (pan/tilt, zoom, focus)
     m_controlThrottle = new QTimer(this);
@@ -470,8 +474,7 @@ void TrackingControlWidget::onTrackingStyleChanged(int index)
 {
     if (index < 0 || !m_controller->hasOriginalTinyCapabilities()) return;
     m_userInitiated = true;
-    if (m_controller->setTrackingStyle(m_trackingStyleCombo->itemData(index).toInt()))
-        m_controller->saveConfig();
+    m_controller->setTrackingStyle(m_trackingStyleCombo->itemData(index).toInt());
     m_commandTimer->start(1000);
 }
 
@@ -515,6 +518,7 @@ void TrackingControlWidget::flushPendingCommands()
 
 void TrackingControlWidget::scheduleFlush()
 {
+    m_commandTimer->start(1000);
     // First change fires immediately, subsequent ones coalesce at 100ms
     if (!m_controlThrottle->isActive()) {
         flushPendingCommands();

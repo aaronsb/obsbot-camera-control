@@ -537,9 +537,14 @@ bool CameraController::setHDR(bool enabled)
 {
     if (!m_connected || m_v4l2Only) return false;
 
-    return executeCommand(enabled ? "Enable HDR" : "Disable HDR", [this, enabled]() {
+    bool success = executeCommand(enabled ? "Enable HDR" : "Disable HDR", [this, enabled]() {
         return m_device->cameraSetWdrR(enabled ? Device::DevWdrModeDol2TO1 : Device::DevWdrModeNone);
     });
+    if (success) {
+        m_currentState.hdrEnabled = enabled;
+        emit stateChanged(m_currentState);
+    }
+    return success;
 }
 
 bool CameraController::setFOV(int fovMode)
@@ -554,27 +559,42 @@ bool CameraController::setFOV(int fovMode)
         default: return false;
     }
 
-    return executeCommand("Set FOV", [this, fov]() {
+    bool success = executeCommand("Set FOV", [this, fov]() {
         return m_device->cameraSetFovU(fov);
     });
+    if (success) {
+        m_currentState.fovMode = fovMode;
+        emit stateChanged(m_currentState);
+    }
+    return success;
 }
 
 bool CameraController::setFaceAE(bool enabled)
 {
     if (!m_connected || m_v4l2Only) return false;
 
-    return executeCommand(enabled ? "Enable Face AE" : "Disable Face AE", [this, enabled]() {
+    bool success = executeCommand(enabled ? "Enable Face AE" : "Disable Face AE", [this, enabled]() {
         return m_device->cameraSetFaceAER(enabled);
     });
+    if (success) {
+        m_currentState.faceAEEnabled = enabled;
+        emit stateChanged(m_currentState);
+    }
+    return success;
 }
 
 bool CameraController::setFaceFocus(bool enabled)
 {
     if (!m_connected || m_v4l2Only) return false;
 
-    return executeCommand(enabled ? "Enable Face Focus" : "Disable Face Focus", [this, enabled]() {
+    bool success = executeCommand(enabled ? "Enable Face Focus" : "Disable Face Focus", [this, enabled]() {
         return m_device->cameraSetFaceFocusR(enabled);
     });
+    if (success) {
+        m_currentState.faceFocusEnabled = enabled;
+        emit stateChanged(m_currentState);
+    }
+    return success;
 }
 
 bool CameraController::setFocusAbsolute(int position, bool autoFocus)
@@ -639,8 +659,10 @@ bool CameraController::setAntiFlicker(int frequency)
     bool success = executeCommand("Set anti-flicker", [this, clamped]() {
         return m_device->cameraSetAntiFlickR(clamped);
     });
-    if (success)
+    if (success) {
         m_currentState.antiFlicker = clamped;
+        emit stateChanged(m_currentState);
+    }
     return success;
 }
 
@@ -714,8 +736,10 @@ bool CameraController::setHue(int value)
     bool success = executeCommand("Set Hue", [this, clamped]() {
         return m_device->cameraSetImageHueR(clamped);
     });
-    if (success)
+    if (success) {
         m_currentState.hue = clamped;
+        emit stateChanged(m_currentState);
+    }
     return success;
 }
 
@@ -726,8 +750,10 @@ bool CameraController::setSharpness(int value)
     bool success = executeCommand("Set Sharpness", [this, clamped]() {
         return m_device->cameraSetImageSharpR(clamped);
     });
-    if (success)
+    if (success) {
         m_currentState.sharpness = clamped;
+        emit stateChanged(m_currentState);
+    }
     return success;
 }
 
@@ -1002,6 +1028,9 @@ void CameraController::applyConfigToCamera()
     setBrightness(settings.brightness);
     setContrast(settings.contrast);
     setSaturation(settings.saturation);
+    setHue(settings.hue);
+    setSharpness(settings.sharpness);
+    setAntiFlicker(settings.antiFlicker);
     if (settings.whiteBalance == static_cast<int>(Device::DevWhiteBalanceManual)) {
         setWhiteBalanceManual(settings.whiteBalanceKelvin);
     } else {
@@ -1047,6 +1076,9 @@ void CameraController::applyCurrentStateToCamera(const CameraState &uiState)
     setBrightness(uiState.brightness);
     setContrast(uiState.contrast);
     setSaturation(uiState.saturation);
+    setHue(uiState.hue);
+    setSharpness(uiState.sharpness);
+    setAntiFlicker(uiState.antiFlicker);
     if (uiState.whiteBalance == static_cast<int>(Device::DevWhiteBalanceManual)) {
         setWhiteBalanceManual(uiState.whiteBalanceKelvin);
     } else {
@@ -1082,6 +1114,9 @@ void CameraController::saveCurrentStateToConfig()
     settings.contrast = m_currentState.contrast;
     settings.saturationAuto = m_currentState.saturationAuto;
     settings.saturation = m_currentState.saturation;
+    settings.hue = m_currentState.hue;
+    settings.sharpness = m_currentState.sharpness;
+    settings.antiFlicker = m_currentState.antiFlicker;
     settings.whiteBalance = m_currentState.whiteBalance;
     settings.whiteBalanceKelvin = m_currentState.whiteBalanceKelvin;
     settings.focus = m_currentState.autoFocusEnabled ? -1 : m_currentState.manualFocusValue;

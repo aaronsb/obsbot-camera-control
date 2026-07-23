@@ -1263,6 +1263,9 @@ void MainWindow::loadConfiguration()
     m_settingsWidget->setContrast(settings.contrast);
     m_settingsWidget->setSaturationAuto(settings.saturationAuto);
     m_settingsWidget->setSaturation(settings.saturation);
+    m_settingsWidget->setHue(settings.hue);
+    m_settingsWidget->setSharpness(settings.sharpness);
+    m_settingsWidget->setAntiFlicker(settings.antiFlicker);
     m_settingsWidget->setWhiteBalance(settings.whiteBalance);
     m_previewWidget->setPreferredFormatId(QString::fromStdString(settings.previewFormat));
 
@@ -1401,6 +1404,9 @@ CameraController::CameraState MainWindow::getUIState() const
     state.contrast = m_settingsWidget->getContrast();
     state.saturationAuto = m_settingsWidget->isSaturationAuto();
     state.saturation = m_settingsWidget->getSaturation();
+    state.hue = m_settingsWidget->getHue();
+    state.sharpness = m_settingsWidget->getSharpness();
+    state.antiFlicker = m_settingsWidget->getAntiFlicker();
     state.whiteBalance = m_settingsWidget->getWhiteBalance();
     state.whiteBalanceKelvin = m_settingsWidget->getWhiteBalanceKelvin();
 

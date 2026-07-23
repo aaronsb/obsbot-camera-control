@@ -1,4 +1,5 @@
 #include "CameraSettingsWidget.h"
+#include <QStandardItemModel>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -595,6 +596,22 @@ void CameraSettingsWidget::applyControlRanges()
                QStringLiteral("Adjust image hue (%1-%2)"));
     applyRange(m_controller->getSharpnessRange(), m_sharpnessSlider, m_sharpnessRangeApplied,
                QStringLiteral("Adjust image sharpness (%1-%2)"));
+
+    const auto antiFlickerRange = m_controller->getAntiFlickerRange();
+    if (antiFlickerRange.valid) {
+        auto *model = qobject_cast<QStandardItemModel *>(m_antiFlickerComboBox->model());
+        for (int i = 0; model && i < m_antiFlickerComboBox->count(); ++i) {
+            const int value = m_antiFlickerComboBox->itemData(i).toInt();
+            if (QStandardItem *item = model->item(i)) {
+                item->setEnabled(value >= antiFlickerRange.min &&
+                                 value <= antiFlickerRange.max);
+            }
+        }
+        m_antiFlickerComboBox->setToolTip(
+            QStringLiteral("Supported anti-flicker modes: %1-%2")
+                .arg(antiFlickerRange.min)
+                .arg(antiFlickerRange.max));
+    }
 
     const auto wbRange = m_controller->getWhiteBalanceKelvinRange();
     if (wbRange.valid) {

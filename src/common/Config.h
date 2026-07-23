@@ -52,6 +52,7 @@ public:
         int aiSubMode;        // Device::AiSubModeType
         bool autoZoom;        // Enable adaptive auto zoom
         int trackSpeed;       // Device::AiTrackSpeedType
+        int trackingStyle;    // Device::AiVerticalTrackType (Tiny/Tiny 4K)
 
         // Image controls
         bool brightnessAuto;  // Auto mode for brightness

@@ -34,6 +34,7 @@ void Config::setDefaults()
     m_settings.aiSubMode = 0;         // AiSubModeNormal
     m_settings.autoZoom = false;
     m_settings.trackSpeed = 2;        // AiTrackSpeedStandard
+    m_settings.trackingStyle = 0;      // AiVTrackStandard
 
     // Image controls - use auto mode by default
     m_settings.brightnessAuto = true;
@@ -430,6 +431,18 @@ bool Config::parseLine(const std::string &line, int lineNumber, std::vector<Vali
             addError(InvalidValue, "track_speed must be an integer between 0 and 5");
             return false;
         }
+    } else if (key == "tracking_style") {
+        try {
+            int style = std::stoi(value);
+            if (style < 0 || style > 2) {
+                addError(InvalidValue, "tracking_style must be between 0 and 2");
+                return false;
+            }
+            m_settings.trackingStyle = style;
+        } catch (...) {
+            addError(InvalidValue, "tracking_style must be an integer between 0 and 2");
+            return false;
+        }
     } else if (key == "brightness_auto") {
         if (!parseBool(value, m_settings.brightnessAuto)) {
             addError(InvalidValue, "brightness_auto must be true/false or enabled/disabled");
@@ -766,6 +779,9 @@ bool Config::save()
 
     file << "# Tracking Speed (0=Lazy,1=Slow,2=Standard,3=Fast,4=Crazy,5=Auto)\n";
     file << "track_speed=" << m_settings.trackSpeed << "\n\n";
+
+    file << "# Tiny tracking style (0=Standard,1=Headroom,2=Motion)\n";
+    file << "tracking_style=" << m_settings.trackingStyle << "\n\n";
 
     // Image controls
     file << "# Brightness Auto Mode (when enabled, brightness slider is read-only)\n";

@@ -37,11 +37,13 @@ public:
     void setHumanSubMode(int subMode);
     void setAutoZoomEnabled(bool enabled);
     void setTrackSpeed(int speedMode);
+    void setTrackingStyle(int style);
     void setAudioAutoGain(bool enabled);
     int currentAiMode() const { return m_modeCombo->currentData().toInt(); }
     int currentHumanSubMode() const { return m_humanSubModeCombo->currentData().toInt(); }
     bool isAutoZoomEnabled() const { return m_autoZoomCheckBox->isChecked(); }
     int currentTrackSpeed() const { return m_speedCombo->currentData().toInt(); }
+    int currentTrackingStyle() const { return m_trackingStyleCombo->currentData().toInt(); }
     bool isAudioAutoGainEnabled() const { return m_audioGainCheckBox->isChecked(); }
     void setMirrored(bool mirrored);
     bool isInvertControls() const { return m_invertControlsCheckBox->isChecked(); }

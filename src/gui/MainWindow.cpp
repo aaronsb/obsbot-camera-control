@@ -1249,6 +1249,7 @@ void MainWindow::loadConfiguration()
     m_trackingWidget->setHumanSubMode(settings.aiSubMode);
     m_trackingWidget->setAutoZoomEnabled(settings.autoZoom);
     m_trackingWidget->setTrackSpeed(settings.trackSpeed);
+    m_trackingWidget->setTrackingStyle(settings.trackingStyle);
     m_trackingWidget->setAudioAutoGain(settings.audioAutoGain);
     m_settingsWidget->setHDREnabled(settings.hdr);
     m_settingsWidget->setFOVMode(settings.fov);
@@ -1386,6 +1387,7 @@ CameraController::CameraState MainWindow::getUIState() const
     state.aiSubMode = m_trackingWidget->currentHumanSubMode();
     state.autoZoomEnabled = m_trackingWidget->isAutoZoomEnabled();
     state.trackSpeedMode = m_trackingWidget->currentTrackSpeed();
+    state.trackingStyle = m_trackingWidget->currentTrackingStyle();
     state.audioAutoGainEnabled = m_trackingWidget->isAudioAutoGainEnabled();
     state.hdrEnabled = m_settingsWidget->isHDREnabled();
     state.fovMode = m_settingsWidget->getFOVMode();

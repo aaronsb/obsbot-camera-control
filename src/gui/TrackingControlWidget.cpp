@@ -464,11 +464,22 @@ void TrackingControlWidget::onAudioGainToggled(bool checked)
     m_commandTimer->start(1000);
 }
 
+void TrackingControlWidget::setTrackingStyle(int style)
+{
+    int index = m_trackingStyleCombo->findData(style);
+    if (index >= 0) {
+        m_trackingStyleCombo->blockSignals(true);
+        m_trackingStyleCombo->setCurrentIndex(index);
+        m_trackingStyleCombo->blockSignals(false);
+    }
+}
+
 void TrackingControlWidget::onTrackingStyleChanged(int index)
 {
     if (index < 0 || !m_controller->hasOriginalTinyCapabilities()) return;
     m_userInitiated = true;
-    m_controller->setTrackingStyle(m_trackingStyleCombo->itemData(index).toInt());
+    if (m_controller->setTrackingStyle(m_trackingStyleCombo->itemData(index).toInt()))
+        m_controller->saveConfig();
     m_commandTimer->start(1000);
 }
 

@@ -607,8 +607,10 @@ bool CameraController::setTrackingStyle(int style)
     bool success = executeCommand("Set tracking style", [this, style]() {
         return m_device->aiSetTrackingModeR(static_cast<Device::AiVerticalTrackType>(style));
     });
-    if (success)
+    if (success) {
         m_currentState.trackingStyle = style;
+        emit stateChanged(m_currentState);
+    }
     return success;
 }
 
@@ -993,6 +995,8 @@ void CameraController::applyConfigToCamera()
         setTrackSpeed(settings.trackSpeed);
         setAudioAutoGain(settings.audioAutoGain);
     }
+    if (isOriginalTinyFamily())
+        setTrackingStyle(settings.trackingStyle);
 
     // Image controls
     setBrightness(settings.brightness);
@@ -1030,6 +1034,8 @@ void CameraController::applyCurrentStateToCamera(const CameraState &uiState)
         setTrackSpeed(uiState.trackSpeedMode);
         setAudioAutoGain(uiState.audioAutoGainEnabled);
     }
+    if (isOriginalTinyFamily())
+        setTrackingStyle(uiState.trackingStyle);
     setHDR(uiState.hdrEnabled);
     setFOV(uiState.fovMode);
     setFaceAE(uiState.faceAEEnabled);
@@ -1066,6 +1072,7 @@ void CameraController::saveCurrentStateToConfig()
     settings.aiSubMode = m_currentState.aiSubMode;
     settings.autoZoom = m_currentState.autoZoomEnabled;
     settings.trackSpeed = m_currentState.trackSpeedMode;
+    settings.trackingStyle = m_currentState.trackingStyle;
     settings.audioAutoGain = m_currentState.audioAutoGainEnabled;
 
     // Image controls

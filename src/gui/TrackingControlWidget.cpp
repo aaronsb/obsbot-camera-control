@@ -128,7 +128,7 @@ TrackingControlWidget::TrackingControlWidget(CameraController *controller, QWidg
     ptzContainerLayout->setContentsMargins(0, 0, 0, 0);
     ptzContainerLayout->setSpacing(0);
 
-    QGroupBox *ptzGroupBox = new QGroupBox("Manual Camera Control", this);
+    QGroupBox *ptzGroupBox = new QGroupBox("Manual Control", this);
     ptzGroupBox->setFlat(true);
     QVBoxLayout *ptzGroupLayout = new QVBoxLayout(ptzGroupBox);
     ptzGroupLayout->setContentsMargins(16, 16, 16, 16);

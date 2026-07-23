@@ -32,8 +32,7 @@ public:
     void setTrackingEnabled(bool enabled) {
         m_trackingCheckBox->blockSignals(true);
         m_trackingCheckBox->setChecked(enabled);
-        m_trackingCheckBox->setText(enabled
-            ? "Disable Auto-Framing" : "Enable Auto-Framing");
+        m_trackingCheckBox->setText(enabled ? "Disable" : "Enable");
         m_trackingCheckBox->blockSignals(false);
     }
     void setAiMode(int mode);
@@ -46,7 +45,7 @@ public:
     int currentHumanSubMode() const { return m_humanSubModeCombo->currentData().toInt(); }
     bool isAutoZoomEnabled() const { return m_autoZoomCheckBox->isChecked(); }
     int currentTrackSpeed() const { return m_speedCombo->currentData().toInt(); }
-    int currentTrackingStyle() const { return m_trackingStyleCombo->currentData().toInt(); }
+    int currentTrackingStyle() const { return m_trackingStyle; }
     bool isAudioAutoGainEnabled() const { return m_audioGainCheckBox->isChecked(); }
     bool isFaceFocusEnabled() const { return m_faceFocusCheckBox->isChecked(); }
     void setFaceFocusEnabled(bool enabled);
@@ -77,7 +76,8 @@ private:
     QCheckBox *m_audioGainCheckBox;
     QWidget *m_advancedContainer;
     QWidget *m_originalTinyContainer;
-    QComboBox *m_trackingStyleCombo;
+    QPushButton *m_trackingStyleButtons[3];
+    int m_trackingStyle = Device::AiVTrackStandard;
     bool m_userInitiated;  // Track if change was user-initiated
     QTimer *m_commandTimer;  // Debounce timer for command completion
     bool m_tiny2Capabilities; // flag for advanced tracking features

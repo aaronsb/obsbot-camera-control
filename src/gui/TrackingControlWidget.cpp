@@ -33,7 +33,7 @@ TrackingControlWidget::TrackingControlWidget(CameraController *controller, QWidg
     groupLayout->setContentsMargins(16, 16, 16, 16);
     groupLayout->setSpacing(12);
 
-    m_trackingCheckBox = new QPushButton("Enable Auto-Framing", this);
+    m_trackingCheckBox = new QPushButton("Enable", this);
     m_trackingCheckBox->setCheckable(true);
     m_trackingCheckBox->setStyleSheet("font-weight: 600; font-size: 14px;");
     connect(m_trackingCheckBox, &QPushButton::toggled,
@@ -44,13 +44,18 @@ TrackingControlWidget::TrackingControlWidget(CameraController *controller, QWidg
     QHBoxLayout *originalTinyLayout = new QHBoxLayout(m_originalTinyContainer);
     originalTinyLayout->setContentsMargins(0, 8, 0, 0);
     originalTinyLayout->addWidget(new QLabel("Tracking Style", this));
-    m_trackingStyleCombo = new QComboBox(this);
-    m_trackingStyleCombo->addItem("Standard", Device::AiVTrackStandard);
-    m_trackingStyleCombo->addItem("Headroom", Device::AiVTrackHeadroom);
-    m_trackingStyleCombo->addItem("Motion", Device::AiVTrackMotion);
-    connect(m_trackingStyleCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
-            this, &TrackingControlWidget::onTrackingStyleChanged);
-    originalTinyLayout->addWidget(m_trackingStyleCombo, 1);
+    static const char *trackingStyleLabels[] = {
+        "Standard", "Headroom", "Motion"
+    };
+    for (int style = 0; style < 3; ++style) {
+        m_trackingStyleButtons[style] =
+            new QPushButton(trackingStyleLabels[style], this);
+        m_trackingStyleButtons[style]->setCheckable(true);
+        connect(m_trackingStyleButtons[style], &QPushButton::clicked,
+                this, [this, style]() { onTrackingStyleChanged(style); });
+        originalTinyLayout->addWidget(m_trackingStyleButtons[style], 1);
+    }
+    setTrackingStyle(Device::AiVTrackStandard);
     groupLayout->addWidget(m_originalTinyContainer);
 
     // Advanced controls container (Tiny 2 family)
@@ -288,8 +293,7 @@ void TrackingControlWidget::setAudioAutoGain(bool enabled)
 void TrackingControlWidget::onTrackingToggled(bool checked)
 {
     m_userInitiated = true;
-    m_trackingCheckBox->setText(checked
-        ? "Disable Auto-Framing" : "Enable Auto-Framing");
+    m_trackingCheckBox->setText(checked ? "Disable" : "Enable");
 
     if (m_tiny2Capabilities) {
         int modeValue = m_modeCombo->currentData().toInt();
@@ -342,8 +346,8 @@ void TrackingControlWidget::updateFromState(const CameraController::CameraState 
         m_trackingCheckBox->setChecked(shouldBeChecked);
         m_trackingCheckBox->blockSignals(false);
     }
-    m_trackingCheckBox->setText(m_trackingCheckBox->isChecked()
-        ? "Disable Auto-Framing" : "Enable Auto-Framing");
+    m_trackingCheckBox->setText(
+        m_trackingCheckBox->isChecked() ? "Disable" : "Enable");
 
     if (!m_userInitiated && !commandInFlight && !isSettling) {
         updatePTZControlsState();
@@ -353,6 +357,11 @@ void TrackingControlWidget::updateFromState(const CameraController::CameraState 
     // Refresh both Tiny2 and original-Tiny containers after every state
     // update so a late SDK connection can reveal the correct controls.
     updateTiny2Visibility();
+
+    if (m_controller->hasOriginalTinyCapabilities()
+            && !m_userInitiated && !commandInFlight && !isSettling) {
+        setTrackingStyle(state.trackingStyle);
+    }
 
     if (m_tiny2Capabilities && !m_userInitiated && !commandInFlight && !isSettling) {
         int modeIdx = m_modeCombo->findData(state.aiMode);
@@ -521,20 +530,25 @@ void TrackingControlWidget::onAudioGainToggled(bool checked)
 
 void TrackingControlWidget::setTrackingStyle(int style)
 {
-    int index = m_trackingStyleCombo->findData(style);
-    if (index >= 0) {
-        m_trackingStyleCombo->blockSignals(true);
-        m_trackingStyleCombo->setCurrentIndex(index);
-        m_trackingStyleCombo->blockSignals(false);
+    if (style < Device::AiVTrackStandard || style > Device::AiVTrackMotion) {
+        return;
     }
-
+    m_trackingStyle = style;
+    for (int buttonStyle = 0; buttonStyle < 3; ++buttonStyle) {
+        QSignalBlocker blocker(m_trackingStyleButtons[buttonStyle]);
+        m_trackingStyleButtons[buttonStyle]->setChecked(buttonStyle == style);
+    }
 }
 
-void TrackingControlWidget::onTrackingStyleChanged(int index)
+void TrackingControlWidget::onTrackingStyleChanged(int style)
 {
-    if (index < 0 || !m_controller->hasOriginalTinyCapabilities()) return;
+    if (style < Device::AiVTrackStandard || style > Device::AiVTrackMotion
+            || !m_controller->hasOriginalTinyCapabilities()) {
+        return;
+    }
     m_userInitiated = true;
-    m_controller->setTrackingStyle(m_trackingStyleCombo->itemData(index).toInt());
+    setTrackingStyle(style);
+    m_controller->setTrackingStyle(style);
     m_commandTimer->start(1000);
 }
 

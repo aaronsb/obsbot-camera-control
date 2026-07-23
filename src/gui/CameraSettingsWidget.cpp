@@ -1,7 +1,9 @@
 #include "CameraSettingsWidget.h"
 #include <QStandardItemModel>
+#include <QMessageBox>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
+#include <QGridLayout>
 #include <QLabel>
 #include <algorithm>
 
@@ -97,6 +99,169 @@ CameraSettingsWidget::CameraSettingsWidget(CameraController *controller, QWidget
     groupLayout->addLayout(antiFlickerLayout);
 
     layout->addWidget(m_advancedGroupBox);
+
+    m_tiny4kDeviceGroup = new QGroupBox("Tiny 4K Device Controls", this);
+    QVBoxLayout *deviceLayout = new QVBoxLayout(m_tiny4kDeviceGroup);
+
+    auto addUvcSlider = [this, deviceLayout](const QString &label,
+                                             QSlider *&slider,
+                                             auto setter) {
+        QHBoxLayout *row = new QHBoxLayout();
+        row->addWidget(new QLabel(label, this));
+        slider = new QSlider(Qt::Horizontal, this);
+        row->addWidget(slider);
+        QPushButton *reset = new QPushButton("Reset", this);
+        row->addWidget(reset);
+        connect(slider, &QSlider::valueChanged, this, [this, setter](int value) {
+            (m_controller->*setter)(value);
+            m_commandTimer->start(1000);
+        });
+        deviceLayout->addLayout(row);
+        return reset;
+    };
+    QPushButton *exposureReset = addUvcSlider(
+        "Exposure:", m_uvcExposureSlider, &CameraController::setTiny4kExposure);
+    connect(exposureReset, &QPushButton::clicked, this, [this]() {
+        auto range = m_controller->getTiny4kExposureRange();
+        if (range.valid) m_uvcExposureSlider->setValue(range.defaultValue);
+    });
+    QPushButton *gainReset = addUvcSlider(
+        "Gain:", m_gainSlider, &CameraController::setTiny4kGain);
+    connect(gainReset, &QPushButton::clicked, this, [this]() {
+        auto range = m_controller->getGainRange();
+        if (range.valid) m_gainSlider->setValue(range.defaultValue);
+    });
+    QPushButton *backlightReset = addUvcSlider(
+        "Backlight:", m_backlightSlider,
+        &CameraController::setTiny4kBacklightCompensation);
+    connect(backlightReset, &QPushButton::clicked, this, [this]() {
+        auto range = m_controller->getBacklightCompensationRange();
+        if (range.valid) m_backlightSlider->setValue(range.defaultValue);
+    });
+
+    QCheckBox *gestureTracking = new QCheckBox("Tracking Gesture", this);
+    connect(gestureTracking, &QCheckBox::toggled, this, [this](bool enabled) {
+        m_controller->setGestureControl(0, enabled);
+    });
+    deviceLayout->addWidget(gestureTracking);
+    QCheckBox *gestureZoom = new QCheckBox("Zoom Gesture", this);
+    connect(gestureZoom, &QCheckBox::toggled, this, [this](bool enabled) {
+        m_controller->setGestureControl(1, enabled);
+    });
+    deviceLayout->addWidget(gestureZoom);
+    QCheckBox *hardwareMirror = new QCheckBox("Hardware Horizontal Flip", this);
+    connect(hardwareMirror, &QCheckBox::toggled, this, [this](bool enabled) {
+        m_controller->setHardwareMirror(enabled);
+    });
+    deviceLayout->addWidget(hardwareMirror);
+    QCheckBox *aiEnabled = new QCheckBox("Global AI Enabled", this);
+    aiEnabled->setChecked(true);
+    connect(aiEnabled, &QCheckBox::toggled, this, [this](bool enabled) {
+        m_controller->setAiEnabled(enabled);
+    });
+    deviceLayout->addWidget(aiEnabled);
+    QCheckBox *sleepMicrophone = new QCheckBox("Microphone Available During Sleep", this);
+    connect(sleepMicrophone, &QCheckBox::toggled, this, [this](bool enabled) {
+        m_controller->setMicrophoneDuringSleep(enabled);
+    });
+    deviceLayout->addWidget(sleepMicrophone);
+
+    QHBoxLayout *sleepTimeoutLayout = new QHBoxLayout();
+    sleepTimeoutLayout->addWidget(new QLabel("Automatic sleep:", this));
+    QSpinBox *sleepTimeout = new QSpinBox(this);
+    sleepTimeout->setRange(0, 65535);
+    sleepTimeout->setSuffix(" s");
+    sleepTimeout->setSpecialValueText("Disabled");
+    sleepTimeoutLayout->addWidget(sleepTimeout);
+    QPushButton *applySleepTimeout = new QPushButton("Apply", this);
+    connect(applySleepTimeout, &QPushButton::clicked, this, [this, sleepTimeout]() {
+        m_controller->setSleepTimeout(sleepTimeout->value());
+    });
+    sleepTimeoutLayout->addWidget(applySleepTimeout);
+    deviceLayout->addLayout(sleepTimeoutLayout);
+
+    QHBoxLayout *powerLayout = new QHBoxLayout();
+    QPushButton *wakeButton = new QPushButton("Wake", this);
+    connect(wakeButton, &QPushButton::clicked, this, [this]() {
+        m_controller->setDeviceAwake(true);
+    });
+    powerLayout->addWidget(wakeButton);
+    QPushButton *sleepButton = new QPushButton("Sleep", this);
+    connect(sleepButton, &QPushButton::clicked, this, [this]() {
+        m_controller->setDeviceAwake(false);
+    });
+    powerLayout->addWidget(sleepButton);
+    QPushButton *bootPositionButton = new QPushButton("Use Current View at Boot", this);
+    connect(bootPositionButton, &QPushButton::clicked, this, [this]() {
+        m_controller->setCurrentViewAsBootPosition();
+    });
+    powerLayout->addWidget(bootPositionButton);
+    deviceLayout->addLayout(powerLayout);
+
+    QLabel *speedLabel = new QLabel("Continuous Gimbal Movement", this);
+    deviceLayout->addWidget(speedLabel);
+    QGridLayout *speedLayout = new QGridLayout();
+    auto addSpeedButton = [this, speedLayout](const QString &text, int row, int column,
+                                              double pitch, double pan) {
+        QPushButton *button = new QPushButton(text, this);
+        connect(button, &QPushButton::pressed, this, [this, pitch, pan]() {
+            m_controller->setGimbalSpeed(pitch, pan);
+        });
+        connect(button, &QPushButton::released, this, [this]() {
+            m_controller->setGimbalSpeed(0.0, 0.0);
+        });
+        speedLayout->addWidget(button, row, column);
+    };
+    addSpeedButton("↑", 0, 1, 30.0, 0.0);
+    addSpeedButton("←", 1, 0, 0.0, -45.0);
+    addSpeedButton("↓", 1, 1, -30.0, 0.0);
+    addSpeedButton("→", 1, 2, 0.0, 45.0);
+    deviceLayout->addLayout(speedLayout);
+
+    for (int id = 0; id < 3; ++id) {
+        QHBoxLayout *presetLayout = new QHBoxLayout();
+        presetLayout->addWidget(new QLabel(QString("Camera Preset %1").arg(id + 1), this));
+        QPushButton *savePreset = new QPushButton("Save", this);
+        connect(savePreset, &QPushButton::clicked, this, [this, id]() {
+            m_controller->saveHardwarePreset(id);
+        });
+        presetLayout->addWidget(savePreset);
+        QPushButton *recallPreset = new QPushButton("Recall", this);
+        connect(recallPreset, &QPushButton::clicked, this, [this, id]() {
+            m_controller->recallHardwarePreset(id);
+        });
+        presetLayout->addWidget(recallPreset);
+        deviceLayout->addLayout(presetLayout);
+    }
+
+    QHBoxLayout *dangerLayout = new QHBoxLayout();
+    QPushButton *verticalMode = new QPushButton("Enable Portrait Mode…", this);
+    connect(verticalMode, &QPushButton::clicked, this, [this]() {
+        if (QMessageBox::warning(this, "Restart Camera",
+                "Changing portrait mode restarts the camera. Enable portrait mode?",
+                QMessageBox::Yes | QMessageBox::No) == QMessageBox::Yes)
+            m_controller->setVerticalMode(true);
+    });
+    dangerLayout->addWidget(verticalMode);
+    QPushButton *landscapeMode = new QPushButton("Landscape Mode…", this);
+    connect(landscapeMode, &QPushButton::clicked, this, [this]() {
+        if (QMessageBox::warning(this, "Restart Camera",
+                "Changing landscape mode restarts the camera. Continue?",
+                QMessageBox::Yes | QMessageBox::No) == QMessageBox::Yes)
+            m_controller->setVerticalMode(false);
+    });
+    dangerLayout->addWidget(landscapeMode);
+    QPushButton *factoryReset = new QPushButton("Factory Reset…", this);
+    connect(factoryReset, &QPushButton::clicked, this, [this]() {
+        if (QMessageBox::critical(this, "Factory Reset",
+                "Reset every camera setting to its factory default? This cannot be undone.",
+                QMessageBox::Reset | QMessageBox::Cancel,
+                QMessageBox::Cancel) == QMessageBox::Reset)
+            m_controller->restoreFactorySettings();
+    });
+    dangerLayout->addWidget(factoryReset);
+    deviceLayout->addLayout(dangerLayout);
+    layout->addWidget(m_tiny4kDeviceGroup);
 
     // Image Controls Group
     QGroupBox *imageGroupBox = new QGroupBox("Image Controls", this);
@@ -445,6 +610,7 @@ void CameraSettingsWidget::updateFromState(const CameraController::CameraState &
     applyControlRanges();
 
     const bool tiny4k = m_controller->hasTiny4kCapabilities();
+    m_tiny4kDeviceGroup->setVisible(tiny4k);
     // Tiny 4K firmware 1.2.6.2 boots in a camera-managed exposure mode that
     // neither its SDK nor UVC menu can restore after switching to manual.
     // Do not expose a one-way control that can leave the image overexposed.
@@ -480,6 +646,15 @@ void CameraSettingsWidget::updateFromState(const CameraController::CameraState &
             m_faceFocusCheckBox->setChecked(state.faceFocusEnabled);
             m_faceFocusCheckBox->blockSignals(false);
         }
+        auto syncSlider = [](QSlider *slider, int value) {
+            if (slider->value() == value) return;
+            slider->blockSignals(true);
+            slider->setValue(value);
+            slider->blockSignals(false);
+        };
+        syncSlider(m_uvcExposureSlider, state.uvcExposure);
+        syncSlider(m_gainSlider, state.gain);
+        syncSlider(m_backlightSlider, state.backlightCompensation);
 
         m_exposureAutoCheckBox->blockSignals(true);
         m_exposureAutoCheckBox->setChecked(state.exposureAuto);
@@ -600,6 +775,12 @@ void CameraSettingsWidget::applyControlRanges()
                QStringLiteral("Adjust image hue (%1-%2)"));
     applyRange(m_controller->getSharpnessRange(), m_sharpnessSlider, m_sharpnessRangeApplied,
                QStringLiteral("Adjust image sharpness (%1-%2)"));
+    applyRange(m_controller->getTiny4kExposureRange(), m_uvcExposureSlider,
+               m_uvcExposureRangeApplied, QStringLiteral("UVC exposure (%1-%2)"));
+    applyRange(m_controller->getGainRange(), m_gainSlider,
+               m_gainRangeApplied, QStringLiteral("UVC gain (%1-%2)"));
+    applyRange(m_controller->getBacklightCompensationRange(), m_backlightSlider,
+               m_backlightRangeApplied, QStringLiteral("Backlight compensation (%1-%2)"));
 
     const auto antiFlickerRange = m_controller->getAntiFlickerRange();
     if (antiFlickerRange.valid) {
@@ -637,6 +818,7 @@ void CameraSettingsWidget::updateWhiteBalanceControls(int mode)
 void CameraSettingsWidget::setV4l2Mode(bool v4l2Only)
 {
     m_advancedGroupBox->setVisible(!v4l2Only);
+    m_tiny4kDeviceGroup->setVisible(!v4l2Only && m_controller->hasTiny4kCapabilities());
 }
 
 void CameraSettingsWidget::updateWhiteBalanceKelvinLabel(int value)

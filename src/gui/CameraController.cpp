@@ -2,6 +2,7 @@
 #include <QThread>
 #include <QDebug>
 #include <algorithm>
+#include <cstring>
 
 static constexpr int kDefaultWhiteBalanceKelvin = 4800;
 
@@ -666,6 +667,158 @@ bool CameraController::setAntiFlicker(int frequency)
     return success;
 }
 
+bool CameraController::setGestureControl(int gesture, bool enabled)
+{
+    if (!m_connected || m_v4l2Only || !isOriginalTinyFamily()) return false;
+    return executeCommand("Set gesture control", [this, gesture, enabled]() {
+        return m_device->aiSetGestureCtrlIndividualR(gesture, enabled);
+    });
+}
+
+bool CameraController::setHardwareMirror(bool enabled)
+{
+    if (!m_connected || m_v4l2Only || !isTiny4k()) return false;
+    return executeCommand("Set hardware mirror", [this, enabled]() {
+        return m_device->cameraSetImageFlipHorizonU(enabled ? 1 : 0);
+    });
+}
+
+bool CameraController::setMicrophoneDuringSleep(bool enabled)
+{
+    if (!m_connected || m_v4l2Only || !isTiny4k()) return false;
+    return executeCommand("Set sleep microphone", [this, enabled]() {
+        return m_device->cameraSetMicrophoneDuringSleepU(enabled ? 1 : 0);
+    });
+}
+
+bool CameraController::setSleepTimeout(int seconds)
+{
+    if (!m_connected || m_v4l2Only || !isOriginalTinyFamily()) return false;
+    return executeCommand("Set sleep timeout", [this, seconds]() {
+        return m_device->cameraSetSuspendTimeU(seconds);
+    });
+}
+
+bool CameraController::setDeviceAwake(bool awake)
+{
+    if (!m_connected || m_v4l2Only) return false;
+    return executeCommand(awake ? "Wake camera" : "Sleep camera", [this, awake]() {
+        return m_device->cameraSetDevRunStatusR(
+            awake ? Device::DevStatusRun : Device::DevStatusSleep);
+    });
+}
+
+bool CameraController::setAiEnabled(bool enabled)
+{
+    if (!m_connected || m_v4l2Only || !isOriginalTinyFamily()) return false;
+    return executeCommand("Set AI enabled", [this, enabled]() {
+        return m_device->aiSetEnabledR(enabled);
+    });
+}
+
+bool CameraController::setVerticalMode(bool enabled)
+{
+    if (!m_connected || m_v4l2Only || !isTiny4k()) return false;
+    return executeCommand("Set vertical mode", [this, enabled]() {
+        return m_device->cameraSetVerticalModeU(enabled ? 1 : 0);
+    });
+}
+
+bool CameraController::restoreFactorySettings()
+{
+    if (!m_connected || m_v4l2Only) return false;
+    return executeCommand("Restore factory settings", [this]() {
+        return m_device->cameraSetRestoreFactorySettingsR();
+    });
+}
+
+bool CameraController::setCurrentViewAsBootPosition()
+{
+    if (!m_connected || m_v4l2Only || !isOriginalTinyFamily()) return false;
+    float attitude[3] = {};
+    if (m_device->gimbalGetAttitudeInfoR(attitude) != 0) return false;
+    float zoom = 1.0f;
+    if (m_device->cameraGetZoomAbsoluteR(zoom) != 0) return false;
+    Device::PresetPosInfo preset{};
+    preset.roll = attitude[0];
+    preset.pitch = attitude[1];
+    preset.yaw = attitude[2];
+    preset.zoom = zoom;
+    return executeCommand("Set boot position", [this, preset]() {
+        return m_device->aiSetGimbalBootPosR(preset);
+    });
+}
+
+bool CameraController::saveHardwarePreset(int id)
+{
+    if (!m_connected || m_v4l2Only || !isOriginalTinyFamily()) return false;
+    float attitude[3] = {};
+    if (m_device->gimbalGetAttitudeInfoR(attitude) != 0) return false;
+    float zoom = 1.0f;
+    if (m_device->cameraGetZoomAbsoluteR(zoom) != 0) return false;
+    Device::PresetPosInfo preset{};
+    preset.id = id;
+    preset.roll = attitude[0];
+    preset.pitch = attitude[1];
+    preset.yaw = attitude[2];
+    preset.zoom = zoom;
+    QByteArray name = QString("Preset %1").arg(id + 1).toUtf8();
+    preset.name_len = qMin(name.size(), 63);
+    std::memcpy(preset.name, name.constData(), preset.name_len);
+    return executeCommand("Save hardware preset", [this, preset]() mutable {
+        return m_device->aiAddGimbalPresetR(&preset);
+    });
+}
+
+bool CameraController::recallHardwarePreset(int id)
+{
+    if (!m_connected || m_v4l2Only || !isOriginalTinyFamily()) return false;
+    return executeCommand("Recall hardware preset", [this, id]() {
+        return m_device->aiTrgGimbalPresetR(id);
+    });
+}
+
+bool CameraController::setGimbalSpeed(double pitch, double pan)
+{
+    if (!m_connected || m_v4l2Only || !isOriginalTinyFamily()) return false;
+    return executeCommand("Set gimbal speed", [this, pitch, pan]() {
+        return m_device->aiSetGimbalSpeedCtrlR(pitch, pan, 0.0);
+    });
+}
+
+bool CameraController::setTiny4kExposure(int value)
+{
+    if (!m_connected || !isTiny4k()) return false;
+    V4l2Backend backend;
+    if (!backend.open(m_device->videoDevPath())) return false;
+    int clamped = clampToRange(value, m_uvcExposureRange, 1, 2500);
+    bool success = backend.setAutoExposure(false) && backend.setExposureAbsolute(clamped);
+    if (success) m_currentState.uvcExposure = clamped;
+    return success;
+}
+
+bool CameraController::setTiny4kGain(int value)
+{
+    if (!m_connected || !isTiny4k()) return false;
+    V4l2Backend backend;
+    if (!backend.open(m_device->videoDevPath())) return false;
+    int clamped = clampToRange(value, m_gainRange, 1, 48);
+    bool success = backend.setGain(clamped);
+    if (success) m_currentState.gain = clamped;
+    return success;
+}
+
+bool CameraController::setTiny4kBacklightCompensation(int value)
+{
+    if (!m_connected || !isTiny4k()) return false;
+    V4l2Backend backend;
+    if (!backend.open(m_device->videoDevPath())) return false;
+    int clamped = clampToRange(value, m_backlightRange, 0, 18);
+    bool success = backend.setBacklightCompensation(clamped);
+    if (success) m_currentState.backlightCompensation = clamped;
+    return success;
+}
+
 bool CameraController::setBrightness(int value)
 {
     if (!m_connected) return false;
@@ -945,6 +1098,17 @@ void CameraController::updateState()
             m_currentState.exposureAuto = exposureAuto;
         }
     }
+    if (isTiny4k()) {
+        V4l2Backend backend;
+        if (backend.open(m_device->videoDevPath())) {
+            int value = backend.getExposureAbsolute();
+            if (value >= 0) m_currentState.uvcExposure = value;
+            value = backend.getGain();
+            if (value >= 0) m_currentState.gain = value;
+            value = backend.getBacklightCompensation();
+            if (value >= 0) m_currentState.backlightCompensation = value;
+        }
+    }
     int32_t antiFlicker = m_currentState.antiFlicker;
     if (m_device->cameraGetAntiFlickR(antiFlicker) == 0)
         m_currentState.antiFlicker = antiFlicker;
@@ -1171,6 +1335,19 @@ void CameraController::refreshControlRanges()
     fetchRange(&Device::cameraGetRangeAntiFlickR, m_antiFlickerRange);
     fetchRange(&Device::cameraGetRangeWhiteBalanceR, m_whiteBalanceKelvinRange);
 
+    if (isTiny4k()) {
+        V4l2Backend backend;
+        if (backend.open(m_device->videoDevPath())) {
+            auto convert = [](V4l2Backend::ControlRange range) {
+                return ParamRange{range.min, range.max, range.step,
+                                  range.defaultValue, range.valid};
+            };
+            m_uvcExposureRange = convert(backend.getExposureRange());
+            m_gainRange = convert(backend.getGainRange());
+            m_backlightRange = convert(backend.getBacklightCompensationRange());
+        }
+    }
+
     m_supportedWhiteBalanceTypes.clear();
     std::vector<int32_t> wbList;
     int32_t wbMin = 0;
@@ -1199,6 +1376,9 @@ void CameraController::resetControlRanges()
     m_sharpnessRange = {};
     m_exposureRange = {};
     m_antiFlickerRange = {};
+    m_uvcExposureRange = {};
+    m_gainRange = {};
+    m_backlightRange = {};
     m_whiteBalanceKelvinRange = {};
     m_supportedWhiteBalanceTypes.clear();
     m_whiteBalanceFallbackActive = false;

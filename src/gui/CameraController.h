@@ -55,6 +55,9 @@ public:
         bool exposureAuto;
         int exposure;
         int antiFlicker;
+        int uvcExposure;
+        int gain;
+        int backlightCompensation;
 
         // Image controls
         bool brightnessAuto; // Auto mode for brightness
@@ -123,6 +126,21 @@ public:
     bool setTrackingStyle(int style);
     bool setExposure(int shutterTime, bool automatic);
     bool setAntiFlicker(int frequency);
+    bool setGestureControl(int gesture, bool enabled);
+    bool setHardwareMirror(bool enabled);
+    bool setMicrophoneDuringSleep(bool enabled);
+    bool setSleepTimeout(int seconds);
+    bool setDeviceAwake(bool awake);
+    bool setAiEnabled(bool enabled);
+    bool setVerticalMode(bool enabled);
+    bool restoreFactorySettings();
+    bool setCurrentViewAsBootPosition();
+    bool saveHardwarePreset(int id);
+    bool recallHardwarePreset(int id);
+    bool setGimbalSpeed(double pitch, double pan);
+    bool setTiny4kExposure(int value);
+    bool setTiny4kGain(int value);
+    bool setTiny4kBacklightCompensation(int value);
 
     // Image controls
     void setBrightnessAuto(bool enabled) { m_currentState.brightnessAuto = enabled; }
@@ -155,6 +173,9 @@ public:
     ParamRange getSharpnessRange() const { return m_sharpnessRange; }
     ParamRange getExposureRange() const { return m_exposureRange; }
     ParamRange getAntiFlickerRange() const { return m_antiFlickerRange; }
+    ParamRange getTiny4kExposureRange() const { return m_uvcExposureRange; }
+    ParamRange getGainRange() const { return m_gainRange; }
+    ParamRange getBacklightCompensationRange() const { return m_backlightRange; }
     ParamRange getWhiteBalanceKelvinRange() const { return m_whiteBalanceKelvinRange; }
     const std::vector<int>& getSupportedWhiteBalanceTypes() const { return m_supportedWhiteBalanceTypes; }
 
@@ -186,6 +207,9 @@ private:
     ParamRange m_sharpnessRange;
     ParamRange m_exposureRange;
     ParamRange m_antiFlickerRange;
+    ParamRange m_uvcExposureRange;
+    ParamRange m_gainRange;
+    ParamRange m_backlightRange;
     ParamRange m_whiteBalanceKelvinRange;
     std::vector<int> m_supportedWhiteBalanceTypes;
     int m_lastRequestedWhiteBalance;

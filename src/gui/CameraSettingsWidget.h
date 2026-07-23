@@ -7,6 +7,7 @@
 #include <QGroupBox>
 #include <QLabel>
 #include <QPushButton>
+#include <QSpinBox>
 #include <QSlider>
 #include <QTimer>
 #include <algorithm>
@@ -194,6 +195,13 @@ private:
     void updateWhiteBalanceKelvinLabel(int value);
 
     QGroupBox *m_advancedGroupBox;
+    QGroupBox *m_tiny4kDeviceGroup;
+    QSlider *m_uvcExposureSlider;
+    QSlider *m_gainSlider;
+    QSlider *m_backlightSlider;
+    bool m_uvcExposureRangeApplied = false;
+    bool m_gainRangeApplied = false;
+    bool m_backlightRangeApplied = false;
 };
 
 #endif // CAMERASETTINGSWIDGET_H

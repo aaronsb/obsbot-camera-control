@@ -335,25 +335,22 @@ void MainWindow::setupUI()
     statusLayout->setContentsMargins(16, 18, 16, 16);
     statusLayout->setSpacing(10);
 
-    QHBoxLayout *statusHeader = new QHBoxLayout();
-    statusHeader->setContentsMargins(0, 0, 0, 0);
-    statusHeader->setSpacing(10);
+    QHBoxLayout *statusMainLayout = new QHBoxLayout();
+    statusMainLayout->setContentsMargins(0, 0, 0, 0);
+    statusMainLayout->setSpacing(14);
+
+    QVBoxLayout *statusTextLayout = new QVBoxLayout();
+    statusTextLayout->setContentsMargins(0, 0, 0, 0);
+    statusTextLayout->setSpacing(6);
     m_statusChip = new QLabel(tr("Camera • Offline"), m_statusBanner);
     m_statusChip->setObjectName("statusChip");
-    statusHeader->addWidget(m_statusChip);
-    statusHeader->addStretch();
-    statusLayout->addLayout(statusHeader);
+    statusTextLayout->addWidget(m_statusChip);
 
     m_deviceInfoLabel = new QLabel(tr("Connecting to camera..."), m_statusBanner);
     m_deviceInfoLabel->setObjectName("deviceInfoLabel");
     m_deviceInfoLabel->setWordWrap(true);
-    statusLayout->addWidget(m_deviceInfoLabel);
-
-    m_cameraWarningLabel = new QLabel(QString(), m_statusBanner);
-    m_cameraWarningLabel->setObjectName("warningLabel");
-    m_cameraWarningLabel->setWordWrap(true);
-    m_cameraWarningLabel->setVisible(false);
-    statusLayout->addWidget(m_cameraWarningLabel);
+    statusTextLayout->addWidget(m_deviceInfoLabel);
+    statusMainLayout->addLayout(statusTextLayout, 1);
 
     QWidget *actionRow = new QWidget(m_statusBanner);
     actionRow->setObjectName("actionRow");
@@ -375,7 +372,14 @@ void MainWindow::setupUI()
         m_controller->connectToCamera();
     });
     actionLayout->addWidget(m_reconnectButton);
-    statusLayout->addWidget(actionRow);
+    statusMainLayout->addWidget(actionRow, 0, Qt::AlignVCenter);
+    statusLayout->addLayout(statusMainLayout);
+
+    m_cameraWarningLabel = new QLabel(QString(), m_statusBanner);
+    m_cameraWarningLabel->setObjectName("warningLabel");
+    m_cameraWarningLabel->setWordWrap(true);
+    m_cameraWarningLabel->setVisible(false);
+    statusLayout->addWidget(m_cameraWarningLabel);
 
     scrollLayout->addWidget(m_statusBanner);
 

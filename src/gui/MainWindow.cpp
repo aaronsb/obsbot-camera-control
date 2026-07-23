@@ -1144,7 +1144,7 @@ void MainWindow::updateStatus()
     auto state = m_controller->getCurrentState();
 
     QStringList statusParts;
-    statusParts << QString("AI: %1").arg(state.aiMode == 0 ? "Off" : "On");
+    statusParts << QString("AI: %1").arg(state.autoFramingEnabled ? "On" : "Off");
     statusParts << QString("Zoom: %1%").arg(state.zoomRatio);
     statusParts << QString("HDR: %1").arg(state.hdrEnabled ? "On" : "Off");
     statusParts << QString("Face AE: %1").arg(state.faceAEEnabled ? "On" : "Off");

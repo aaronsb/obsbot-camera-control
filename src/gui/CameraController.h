@@ -170,6 +170,7 @@ private:
     bool m_whiteBalanceFallbackActive;
     int m_fallbackWhiteBalanceMode;
     bool isTiny2Family() const;
+    bool isOriginalTinyFamily() const;
     void tryV4l2Fallback();
     void connectV4l2(const std::string &devicePath);
     void refreshV4l2ControlRanges();

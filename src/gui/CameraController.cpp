@@ -279,6 +279,20 @@ bool CameraController::enableAutoFraming(bool enabled)
 {
     if (!m_connected || m_v4l2Only) return false;
 
+    // Tiny and Tiny 4K predate the AiWorkMode/MediaMode APIs.  The SDK sample
+    // and API documentation require target selection for these two cameras.
+    if (isOriginalTinyFamily()) {
+        bool success = executeCommand(enabled ? "Enable AI tracking" : "Disable AI tracking",
+                                      [this, enabled]() {
+            return m_device->aiSetTargetSelectR(enabled);
+        });
+        if (success) {
+            m_currentState.autoFramingEnabled = enabled;
+            emit stateChanged(m_currentState);
+        }
+        return success;
+    }
+
     if (enabled) {
         // Step 1: Set MediaMode to AutoFrame
         if (!executeCommand("Set MediaMode to AutoFrame", [this]() {
@@ -398,9 +412,19 @@ bool CameraController::setPanTilt(double pan, double tilt)
         int tiltVal = static_cast<int>(tilt * tiltRange.max);
         success = m_v4l2.setPanAbsolute(panVal) && m_v4l2.setTiltAbsolute(tiltVal);
     } else {
-        success = executeCommand("Set Pan/Tilt", [this, pan, tilt]() {
-            return m_device->cameraSetPanTiltAbsolute(pan, tilt);
-        });
+        if (isOriginalTinyFamily()) {
+            // The original Tiny SDK uses gimbal angles in degrees. The
+            // cameraSetPanTiltAbsolute API is documented for Meet cameras.
+            success = executeCommand("Set Pan/Tilt", [this, pan, tilt]() {
+                return m_device->gimbalSetSpeedPositionR(
+                    0.0f, static_cast<float>(tilt * 90.0),
+                    static_cast<float>(pan * 120.0), 0.0f, 90.0f, 90.0f);
+            });
+        } else {
+            success = executeCommand("Set Pan/Tilt", [this, pan, tilt]() {
+                return m_device->cameraSetPanTiltAbsolute(pan, tilt);
+            });
+        }
     }
 
     if (success) {
@@ -437,10 +461,16 @@ bool CameraController::setZoom(double zoom)
         int v4l2Zoom = static_cast<int>((zoom - 1.0) * zoomMax);
         success = m_v4l2.setZoomAbsolute(v4l2Zoom);
     } else {
-        uint32_t zoomRatio = static_cast<uint32_t>(zoom * 100);
-        success = executeCommand("Set Zoom", [this, zoomRatio]() {
-            return m_device->cameraSetZoomWithSpeedAbsoluteR(zoomRatio, 255);
-        });
+        if (isOriginalTinyFamily()) {
+            success = executeCommand("Set Zoom", [this, zoom]() {
+                return m_device->cameraSetZoomAbsoluteR(static_cast<float>(zoom));
+            });
+        } else {
+            uint32_t zoomRatio = static_cast<uint32_t>(zoom * 100);
+            success = executeCommand("Set Zoom", [this, zoomRatio]() {
+                return m_device->cameraSetZoomWithSpeedAbsoluteR(zoomRatio, 255);
+            });
+        }
     }
 
     if (success) {
@@ -453,6 +483,17 @@ bool CameraController::setZoom(double zoom)
 
 bool CameraController::centerView()
 {
+    if (m_connected && !m_v4l2Only && isOriginalTinyFamily()) {
+        bool success = executeCommand("Center gimbal", [this]() {
+            return m_device->gimbalRstPosR();
+        });
+        if (success) {
+            m_currentState.pan = 0.0;
+            m_currentState.tilt = 0.0;
+            emit stateChanged(m_currentState);
+        }
+        return success;
+    }
     return setPanTilt(0.0, 0.0);
 }
 
@@ -719,13 +760,14 @@ void CameraController::updateState()
 
     m_currentState.aiMode = status.tiny.ai_mode;
     m_currentState.aiSubMode = status.tiny.ai_sub_mode;
-    m_currentState.zoomRatio = status.tiny.zoom_ratio;
-    // Derive zoom float from zoom_ratio (100 = 1.0x, 200 = 2.0x)
-    if (status.tiny.zoom_ratio >= 100 && status.tiny.zoom_ratio <= 200) {
-        m_currentState.zoom = status.tiny.zoom_ratio / 100.0;
-    } else {
-        qDebug() << "CameraController: unexpected zoom_ratio" << status.tiny.zoom_ratio
-                 << "— keeping previous zoom" << m_currentState.zoom;
+    // Tiny/Tiny 4K report zoom_ratio as 0..100, not 100..200. The normalized
+    // getter is supported across the OBSBOT product families and avoids
+    // interpreting product-specific status layouts.
+    float zoom = 1.0f;
+    if (m_device->cameraGetZoomAbsoluteR(zoom) == 0 &&
+        zoom >= 1.0f && zoom <= 2.0f) {
+        m_currentState.zoom = zoom;
+        m_currentState.zoomRatio = qRound(zoom * 100.0f);
     }
     m_currentState.hdrEnabled = status.tiny.hdr;
     m_currentState.faceAEEnabled = status.tiny.face_ae;
@@ -734,7 +776,9 @@ void CameraController::updateState()
     m_currentState.manualFocusValue = status.tiny.manual_focus_value;
     m_currentState.fovMode = status.tiny.fov;
     m_currentState.devStatus = status.tiny.dev_status;
-    m_currentState.autoFramingEnabled = (m_currentState.aiMode != Device::AiWorkModeNone);
+    m_currentState.autoFramingEnabled = isOriginalTinyFamily()
+        ? status.tiny.ai_target != 0
+        : m_currentState.aiMode != Device::AiWorkModeNone;
     m_currentState.trackSpeedMode = status.tiny.ai_tracker_speed;
     m_currentState.audioAutoGainEnabled = status.tiny.audio_auto_gain;
 
@@ -924,6 +968,12 @@ bool CameraController::isTiny2Family() const
     return m_cameraInfo.productType == ObsbotProdTiny2 ||
            m_cameraInfo.productType == ObsbotProdTiny2Lite ||
            m_cameraInfo.productType == ObsbotProdTinySE;
+}
+
+bool CameraController::isOriginalTinyFamily() const
+{
+    return m_cameraInfo.productType == ObsbotProdTiny ||
+           m_cameraInfo.productType == ObsbotProdTiny4k;
 }
 
 void CameraController::refreshControlRanges()

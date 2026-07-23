@@ -636,8 +636,8 @@ void MainWindow::applyModernStyle()
 
     const QColor accentBackground = withAlphaF(blendColors(highlight, cardBackground, 0.25), 0.48);
     const QColor accentBorder = withAlphaF(blendColors(highlight, cardBorder, 0.25), 0.75);
-    const QColor accentChipBackground = withAlphaF(blendColors(highlight, cardBackground, 0.15), 0.7);
     const QColor accentChipText = blendColors(highlightedText.isValid() ? highlightedText : brightText, text, 0.2);
+    const QColor connectedStatusColor = QColor(QStringLiteral("#22c55e"));
 
     const QColor warningColor = blendColors(highlight.lighter(140), text, 0.4);
 
@@ -758,7 +758,7 @@ void MainWindow::applyModernStyle()
         .arg(toCssColor(accentBorder))
         .arg(toCssColor(mutedChipBackground))
         .arg(toCssColor(mutedChipText))
-        .arg(toCssColor(accentChipBackground))
+        .arg(toCssColor(connectedStatusColor))
         .arg(toCssColor(accentChipText))
         .arg(toCssColor(warningColor))
         .arg(toCssColor(previewPlaceholderText))

@@ -209,7 +209,7 @@ void PTZControlWidget::onStoreImagePreset()
     preset.state.hdrEnabled = m_settingsWidget->isHDREnabled();
     preset.state.fovMode = m_settingsWidget->getFOVMode();
     preset.state.faceAE = m_settingsWidget->isFaceAEEnabled();
-    preset.state.faceFocus = m_settingsWidget->isFaceFocusEnabled();
+    preset.state.faceFocus = m_controller->getCurrentState().faceFocusEnabled;
     preset.state.brightnessAuto = m_settingsWidget->isBrightnessAuto();
     preset.state.brightness = m_settingsWidget->getBrightness();
     preset.state.contrastAuto = m_settingsWidget->isContrastAuto();
@@ -246,7 +246,7 @@ void PTZControlWidget::onRecallImagePreset()
     m_settingsWidget->setHDREnabled(preset.state.hdrEnabled);
     m_settingsWidget->setFOVMode(preset.state.fovMode);
     m_settingsWidget->setFaceAEEnabled(preset.state.faceAE);
-    m_settingsWidget->setFaceFocusEnabled(preset.state.faceFocus);
+    m_controller->setFaceFocus(preset.state.faceFocus);
     m_settingsWidget->setBrightnessAuto(preset.state.brightnessAuto);
     m_settingsWidget->setBrightness(preset.state.brightness);
     m_settingsWidget->setContrastAuto(preset.state.contrastAuto);

@@ -159,7 +159,34 @@ TrackingControlWidget::TrackingControlWidget(CameraController *controller, QWidg
     zoomGroupLayout->addLayout(fovLayout);
     layout->addWidget(zoomGroupBox);
 
-    // Manual pan/tilt/focus controls (disabled when auto-framing is enabled)
+    // Focus remains available while auto-framing is enabled.
+    QGroupBox *focusGroupBox = new QGroupBox("Focus", this);
+    focusGroupBox->setFlat(true);
+    QVBoxLayout *focusGroupLayout = new QVBoxLayout(focusGroupBox);
+    focusGroupLayout->setContentsMargins(16, 16, 16, 16);
+    focusGroupLayout->setSpacing(8);
+
+    m_faceFocusCheckBox = new QCheckBox("Face-based Auto Focus", this);
+    m_faceFocusCheckBox->setToolTip("Optimize focus for faces");
+    connect(m_faceFocusCheckBox, &QCheckBox::toggled,
+            this, &TrackingControlWidget::onFaceFocusToggled);
+    focusGroupLayout->addWidget(m_faceFocusCheckBox);
+
+    QHBoxLayout *focusLayout = new QHBoxLayout();
+    m_focusSlider = new QSlider(Qt::Horizontal, this);
+    m_focusSlider->setMinimum(0);
+    m_focusSlider->setMaximum(100);
+    m_focusSlider->setValue(50);
+    connect(m_focusSlider, &QSlider::valueChanged,
+            this, &TrackingControlWidget::onFocusChanged);
+    focusLayout->addWidget(m_focusSlider, 1);
+    m_focusLabel = new QLabel("50", this);
+    m_focusLabel->setMinimumWidth(40);
+    focusLayout->addWidget(m_focusLabel);
+    focusGroupLayout->addLayout(focusLayout);
+    layout->addWidget(focusGroupBox);
+
+    // Manual pan/tilt controls (disabled when auto-framing is enabled)
     m_ptzContainer = new QWidget(this);
     QVBoxLayout *ptzContainerLayout = new QVBoxLayout(m_ptzContainer);
     ptzContainerLayout->setContentsMargins(0, 0, 0, 0);
@@ -175,25 +202,9 @@ TrackingControlWidget::TrackingControlWidget(CameraController *controller, QWidg
     QHBoxLayout *columnsLayout = new QHBoxLayout();
     columnsLayout->setSpacing(16);
 
-    // Left column: sliders and checkboxes
+    // Left column: manual-control options
     QVBoxLayout *leftColumn = new QVBoxLayout();
     leftColumn->addStretch();
-
-    // Focus slider
-    QHBoxLayout *focusLayout = new QHBoxLayout();
-    QLabel *focusLabel = new QLabel("Focus:", this);
-    focusLabel->setFixedWidth(40);
-    focusLayout->addWidget(focusLabel);
-    m_focusSlider = new QSlider(Qt::Horizontal, this);
-    m_focusSlider->setMinimum(0);
-    m_focusSlider->setMaximum(100);
-    m_focusSlider->setValue(50);
-    connect(m_focusSlider, &QSlider::valueChanged, this, &TrackingControlWidget::onFocusChanged);
-    focusLayout->addWidget(m_focusSlider);
-    m_focusLabel = new QLabel("50", this);
-    m_focusLabel->setMinimumWidth(40);
-    focusLayout->addWidget(m_focusLabel);
-    leftColumn->addLayout(focusLayout);
 
     // Invert controls checkbox
     m_invertControlsCheckBox = new QCheckBox(tr("Invert controls"), this);
@@ -248,6 +259,13 @@ void TrackingControlWidget::setAutoZoomEnabled(bool enabled)
 {
     QSignalBlocker blocker(m_autoZoomCheckBox);
     m_autoZoomCheckBox->setChecked(enabled);
+}
+
+void TrackingControlWidget::setFaceFocusEnabled(bool enabled)
+{
+    QSignalBlocker blocker(m_faceFocusCheckBox);
+    m_faceFocusCheckBox->setChecked(enabled);
+    m_focusSlider->setEnabled(!enabled);
 }
 
 void TrackingControlWidget::setTrackSpeed(int speedMode)
@@ -366,8 +384,17 @@ void TrackingControlWidget::updateFromState(const CameraController::CameraState 
         }
     }
 
-    // Sync focus slider from camera state (only when user isn't dragging)
-    if (!m_focusSlider->isSliderDown() && !commandInFlight && !isSettling) {
+    if (!commandInFlight && !isSettling
+            && m_faceFocusCheckBox->isChecked() != state.faceFocusEnabled) {
+        QSignalBlocker blocker(m_faceFocusCheckBox);
+        m_faceFocusCheckBox->setChecked(state.faceFocusEnabled);
+    }
+    m_focusSlider->setEnabled(!state.faceFocusEnabled);
+
+    // Face autofocus keeps reporting the current motor position even though
+    // the slider is read-only.
+    if (!m_focusSlider->isSliderDown()
+            && (!commandInFlight || state.faceFocusEnabled) && !isSettling) {
         if (m_focusSlider->value() != state.manualFocusValue) {
             m_focusSlider->blockSignals(true);
             m_focusSlider->setValue(state.manualFocusValue);
@@ -582,6 +609,14 @@ void TrackingControlWidget::onFocusChanged(int value)
     m_dirtyFocus = true;
     m_focusLabel->setText(QString::number(value));
     scheduleFlush();
+}
+
+void TrackingControlWidget::onFaceFocusToggled(bool checked)
+{
+    m_userInitiated = true;
+    m_focusSlider->setEnabled(!checked);
+    m_controller->setFaceFocus(checked);
+    m_commandTimer->start(1000);
 }
 
 void TrackingControlWidget::setV4l2Mode(bool v4l2Only)

@@ -1291,7 +1291,7 @@ void MainWindow::loadConfiguration()
     m_settingsWidget->setHDREnabled(settings.hdr);
     m_settingsWidget->setFOVMode(settings.fov);
     m_settingsWidget->setFaceAEEnabled(settings.faceAE);
-    m_settingsWidget->setFaceFocusEnabled(settings.faceFocus);
+    m_trackingWidget->setFaceFocusEnabled(settings.faceFocus);
 
     // Image controls
     m_settingsWidget->setBrightnessAuto(settings.brightnessAuto);
@@ -1432,7 +1432,7 @@ CameraController::CameraState MainWindow::getUIState() const
     state.hdrEnabled = m_settingsWidget->isHDREnabled();
     state.fovMode = m_settingsWidget->getFOVMode();
     state.faceAEEnabled = m_settingsWidget->isFaceAEEnabled();
-    state.faceFocusEnabled = m_settingsWidget->isFaceFocusEnabled();
+    state.faceFocusEnabled = m_trackingWidget->isFaceFocusEnabled();
 
     // Image controls
     state.brightnessAuto = m_settingsWidget->isBrightnessAuto();

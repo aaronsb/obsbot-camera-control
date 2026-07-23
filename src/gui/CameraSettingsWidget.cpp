@@ -54,12 +54,6 @@ CameraSettingsWidget::CameraSettingsWidget(CameraController *controller, QWidget
     connect(m_faceAECheckBox, &QCheckBox::toggled, this, &CameraSettingsWidget::onFaceAEToggled);
     groupLayout->addWidget(m_faceAECheckBox);
 
-    // Face Focus
-    m_faceFocusCheckBox = new QCheckBox("Face-based Auto Focus", this);
-    m_faceFocusCheckBox->setToolTip("Optimize focus for faces");
-    connect(m_faceFocusCheckBox, &QCheckBox::toggled, this, &CameraSettingsWidget::onFaceFocusToggled);
-    groupLayout->addWidget(m_faceFocusCheckBox);
-
     QHBoxLayout *exposureLayout = new QHBoxLayout();
     m_exposureAutoCheckBox = new QCheckBox("Auto Exposure", this);
     m_exposureAutoCheckBox->setToolTip("Continuously adapt exposure to changing light");
@@ -433,13 +427,6 @@ void CameraSettingsWidget::onFaceAEToggled(bool checked)
     m_commandTimer->start(1000);
 }
 
-void CameraSettingsWidget::onFaceFocusToggled(bool checked)
-{
-    m_userInitiated = true;
-    m_controller->setFaceFocus(checked);
-    m_commandTimer->start(1000);
-}
-
 void CameraSettingsWidget::onExposureAutoToggled(bool checked)
 {
     m_userInitiated = true;
@@ -625,11 +612,6 @@ void CameraSettingsWidget::updateFromState(const CameraController::CameraState &
             m_faceAECheckBox->blockSignals(false);
         }
 
-        if (m_faceFocusCheckBox->isChecked() != state.faceFocusEnabled) {
-            m_faceFocusCheckBox->blockSignals(true);
-            m_faceFocusCheckBox->setChecked(state.faceFocusEnabled);
-            m_faceFocusCheckBox->blockSignals(false);
-        }
         auto syncSlider = [](QSlider *slider, int value) {
             if (slider->value() == value) return;
             slider->blockSignals(true);

@@ -46,6 +46,8 @@ public:
     int currentTrackSpeed() const { return m_speedCombo->currentData().toInt(); }
     int currentTrackingStyle() const { return m_trackingStyleCombo->currentData().toInt(); }
     bool isAudioAutoGainEnabled() const { return m_audioGainCheckBox->isChecked(); }
+    bool isFaceFocusEnabled() const { return m_faceFocusCheckBox->isChecked(); }
+    void setFaceFocusEnabled(bool enabled);
     bool isInvertControls() const { return m_invertControlsCheckBox->isChecked(); }
 
 private slots:
@@ -56,6 +58,7 @@ private slots:
     void onSpeedChanged(int index);
     void onAudioGainToggled(bool checked);
     void onTrackingStyleChanged(int index);
+    void onFaceFocusToggled(bool checked);
 
     // Manual PTZ control slots
     void onXYPadChanged(float x, float y);
@@ -85,6 +88,7 @@ private:
     QPushButton *m_fovButtons[3];
     QSlider *m_focusSlider;
     QLabel *m_focusLabel;
+    QCheckBox *m_faceFocusCheckBox;
     QLabel *m_positionLabel;
     QWidget *m_ptzContainer;
 

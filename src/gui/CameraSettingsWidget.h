@@ -31,7 +31,6 @@ public:
     bool isHDREnabled() const { return m_hdrCheckBox->isChecked(); }
     int getFOVMode() const { return m_fovComboBox->currentIndex(); }
     bool isFaceAEEnabled() const { return m_faceAECheckBox->isChecked(); }
-    bool isFaceFocusEnabled() const { return m_faceFocusCheckBox->isChecked(); }
     bool isBrightnessAuto() const { return false; }
     int getBrightness() const { return m_brightnessSlider->value(); }
     bool isContrastAuto() const { return false; }
@@ -59,11 +58,6 @@ public:
         m_faceAECheckBox->blockSignals(true);
         m_faceAECheckBox->setChecked(enabled);
         m_faceAECheckBox->blockSignals(false);
-    }
-    void setFaceFocusEnabled(bool enabled) {
-        m_faceFocusCheckBox->blockSignals(true);
-        m_faceFocusCheckBox->setChecked(enabled);
-        m_faceFocusCheckBox->blockSignals(false);
     }
     void setBrightnessAuto(bool enabled) {
         Q_UNUSED(enabled);
@@ -141,7 +135,6 @@ private slots:
     void onHDRToggled(bool checked);
     void onFOVChanged(int index);
     void onFaceAEToggled(bool checked);
-    void onFaceFocusToggled(bool checked);
     void onExposureAutoToggled(bool checked);
     void onExposureChanged(int index);
     void onAntiFlickerChanged(int index);
@@ -162,7 +155,6 @@ private:
     QCheckBox *m_hdrCheckBox;
     QComboBox *m_fovComboBox;
     QCheckBox *m_faceAECheckBox;
-    QCheckBox *m_faceFocusCheckBox;
     QCheckBox *m_exposureAutoCheckBox;
     QLabel *m_exposureLabel;
     QComboBox *m_exposureComboBox;

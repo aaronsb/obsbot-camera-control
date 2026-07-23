@@ -16,7 +16,7 @@ For a clean rebuild:
 
 ## Dependencies
 
-**Build**: cmake, make, gcc/g++, qt6-base, qt6-multimedia, Qt6 OpenGL, pkg-config
+**Build**: cmake, make, gcc/g++, qt6-base, qt6-multimedia, Qt6 OpenGLWidgets, pkg-config
 
 On Arch: `pacman -S cmake qt6-base qt6-multimedia`
 

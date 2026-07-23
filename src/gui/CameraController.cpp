@@ -574,6 +574,21 @@ bool CameraController::setFOV(int fovMode)
             m_currentState.zoomRatio = qRound(zoom * 100.0f);
         }
         emit stateChanged(m_currentState);
+
+        // Tiny/Tiny 4K apply named FOV presets asynchronously. The immediate
+        // getter above can still return the previous zoom, so read it again
+        // after both the camera movement and UI command debounce have settled.
+        QTimer::singleShot(1100, this, [this, fovMode]() {
+            if (!m_connected || m_v4l2Only || m_currentState.fovMode != fovMode)
+                return;
+            float settledZoom = m_currentState.zoom;
+            if (m_device->cameraGetZoomAbsoluteR(settledZoom) == 0
+                    && settledZoom >= 1.0f && settledZoom <= 2.0f) {
+                m_currentState.zoom = settledZoom;
+                m_currentState.zoomRatio = qRound(settledZoom * 100.0f);
+                emit stateChanged(m_currentState);
+            }
+        });
     }
     return success;
 }

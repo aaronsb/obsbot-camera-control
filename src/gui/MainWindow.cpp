@@ -327,7 +327,7 @@ void MainWindow::setupUI()
     scrollContent->setMinimumWidth(0);  // allow shrinking to viewport so content is not clipped
     QVBoxLayout *scrollLayout = new QVBoxLayout(scrollContent);
     scrollLayout->setContentsMargins(18, 20, 18, 20);
-    scrollLayout->setSpacing(18);
+    scrollLayout->setSpacing(12);
 
     m_statusBanner = new QFrame(scrollContent);
     m_statusBanner->setObjectName("statusBanner");
@@ -448,7 +448,7 @@ void MainWindow::setupUI()
 
     QWidget *virtualCameraPage = new QWidget(m_tabWidget);
     QVBoxLayout *virtualCameraPageLayout = new QVBoxLayout(virtualCameraPage);
-    virtualCameraPageLayout->setContentsMargins(8, 14, 8, 14);
+    virtualCameraPageLayout->setContentsMargins(8, 8, 8, 14);
     virtualCameraPageLayout->setSpacing(14);
 
     QGroupBox *virtualCameraGroup = new QGroupBox(tr("Virtual Camera"), virtualCameraPage);
@@ -514,7 +514,7 @@ void MainWindow::setupUI()
 
     QWidget *settingsPage = new QWidget(m_tabWidget);
     QVBoxLayout *settingsPageLayout = new QVBoxLayout(settingsPage);
-    settingsPageLayout->setContentsMargins(8, 14, 8, 14);
+    settingsPageLayout->setContentsMargins(8, 8, 8, 14);
     settingsPageLayout->setSpacing(14);
 
     QGroupBox *snapshotGroup = new QGroupBox(tr("Snapshots"), settingsPage);
@@ -733,7 +733,7 @@ void MainWindow::applyModernStyle()
         }
         QTabWidget#controlTabs::pane {
             border: none;
-            margin-top: 18px;
+            margin-top: 10px;
         }
         QTabWidget#controlTabs::tab-bar {
             alignment: center;

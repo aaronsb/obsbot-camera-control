@@ -52,7 +52,7 @@ VideoEffectsWidget::VideoEffectsWidget(QWidget *parent)
     , m_highlightColorButton(nullptr)
 {
     auto *rootLayout = new QVBoxLayout(this);
-    rootLayout->setContentsMargins(12, 12, 12, 12);
+    rootLayout->setContentsMargins(12, 8, 12, 12);
     rootLayout->setSpacing(12);
 
     QLabel *infoLabel = new QLabel(

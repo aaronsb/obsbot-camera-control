@@ -24,7 +24,7 @@ TrackingControlWidget::TrackingControlWidget(CameraController *controller, QWidg
     m_tiny2Capabilities = m_controller->hasTiny2Capabilities();
 
     QVBoxLayout *layout = new QVBoxLayout(this);
-    layout->setContentsMargins(8, 14, 8, 14);
+    layout->setContentsMargins(8, 8, 8, 14);
     layout->setSpacing(14);
 
     m_trackingGroupBox = new QGroupBox("AI Tracking", this);
@@ -212,22 +212,17 @@ TrackingControlWidget::TrackingControlWidget(CameraController *controller, QWidg
     QHBoxLayout *columnsLayout = new QHBoxLayout();
     columnsLayout->setSpacing(16);
 
-    // Left column: manual-control options
-    QVBoxLayout *leftColumn = new QVBoxLayout();
-    leftColumn->addStretch();
-
     // Invert controls checkbox
     m_invertControlsCheckBox = new QCheckBox(tr("Invert controls"), this);
     m_invertControlsCheckBox->setStyleSheet("font-size: 10px;");
-    leftColumn->addWidget(m_invertControlsCheckBox);
+    ptzGroupLayout->addWidget(m_invertControlsCheckBox);
 
-    leftColumn->addStretch();
-    columnsLayout->addLayout(leftColumn, 1);
-
-    // Right column: XY pad for pan/tilt
+    // Centered XY pad for pan/tilt
     m_xyPad = new XYPad(this);
     connect(m_xyPad, &XYPad::positionChanged, this, &TrackingControlWidget::onXYPadChanged);
+    columnsLayout->addStretch(1);
     columnsLayout->addWidget(m_xyPad);
+    columnsLayout->addStretch(1);
 
     ptzGroupLayout->addLayout(columnsLayout);
 

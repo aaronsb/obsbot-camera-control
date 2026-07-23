@@ -20,7 +20,7 @@ CameraSettingsWidget::CameraSettingsWidget(CameraController *controller, QWidget
             m_controller->saveConfig();
     });
     QVBoxLayout *layout = new QVBoxLayout(this);
-    layout->setContentsMargins(8, 14, 8, 14);
+    layout->setContentsMargins(8, 8, 8, 14);
     layout->setSpacing(14);
 
     m_advancedGroupBox = new QGroupBox("Advanced Camera Settings", this);

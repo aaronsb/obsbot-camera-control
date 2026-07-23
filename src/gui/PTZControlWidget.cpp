@@ -11,7 +11,7 @@ PTZControlWidget::PTZControlWidget(CameraController *controller, QWidget *parent
     , m_positionPresetGroup(nullptr)
 {
     QVBoxLayout *layout = new QVBoxLayout(this);
-    layout->setContentsMargins(8, 14, 8, 14);
+    layout->setContentsMargins(8, 8, 8, 14);
     layout->setSpacing(14);
 
     // Presets section

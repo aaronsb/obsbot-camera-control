@@ -685,9 +685,6 @@ void MainWindow::applyModernStyle()
     const QColor comboSelectionBackground = withAlphaF(highlight, 0.75);
     const QColor comboSelectionText = accentChipText;
 
-    const QColor groupBorder = withAlphaF(blendColors(cardBorder, mutedTone, 0.35), 0.55);
-    const QColor tabBackground = withAlphaF(blendColors(button, cardBackground, 0.2), 0.5);
-
     const QColor footerStatusColor = withAlphaF(text, 0.65);
     const QColor footerCheckboxColor = withAlphaF(text, 0.7);
     const QColor detachCheckedText = highlight;
@@ -733,39 +730,15 @@ void MainWindow::applyModernStyle()
             border-radius: 12px;
             padding: 28px;
         }
-        QGroupBox {
-            border: 1px solid %14;
-            border-radius: 14px;
-            margin-top: 14px;
-        }
-        QGroupBox::title {
-            subcontrol-origin: margin;
-            left: 18px;
-            top: -2px;
-            padding: 0 8px;
-            font-weight: 600;
-            background-color: %1;
-        }
         QTabWidget#controlTabs::pane {
             border: none;
             margin-top: 10px;
         }
-        QTabWidget#controlTabs::tab-bar {
-            alignment: center;
-        }
-        QTabBar::tab {
-            padding: 6px 10px;
-            margin: 0 2px;
-            font-size: 13px;
-        }
-        QTabBar::tab:selected {
-            font-weight: 600;
-        }
         QLabel#footerStatus {
-            color: %15;
+            color: %14;
         }
         QCheckBox#footerCheckbox {
-            color: %16;
+            color: %15;
         }
     )")
         .arg(toCssColor(cardBackground))
@@ -781,7 +754,6 @@ void MainWindow::applyModernStyle()
         .arg(toCssColor(warningColor))
         .arg(toCssColor(previewPlaceholderText))
         .arg(toCssColor(previewPlaceholderBorder))
-        .arg(toCssColor(groupBorder))
         .arg(toCssColor(footerStatusColor))
         .arg(toCssColor(footerCheckboxColor));
 
@@ -1234,26 +1206,31 @@ void MainWindow::updateVirtualCameraAvailability(const QString &devicePath)
     const QString modprobeCommand = modprobeCommandForDevice(devicePath);
 
     QString statusText;
-    QString statusColor;
+    const bool darkTheme = palette().color(QPalette::Window).lightness() < 128;
+    QColor statusColor;
 
     if (deviceExists) {
         statusText = tr("Virtual camera available (%1)").arg(devicePath);
-        statusColor = QStringLiteral("#2e7d32");
+        statusColor = darkTheme ? QColor(QStringLiteral("#81c784"))
+                                : QColor(QStringLiteral("#2e7d32"));
         m_virtualCameraAvailable = true;
     } else if (moduleLoaded) {
         statusText = tr("v4l2loopback is loaded, but %1 does not exist.\nRun: %2")
                          .arg(devicePath, modprobeCommand);
-        statusColor = QStringLiteral("#b26a00");
+        statusColor = darkTheme ? QColor(QStringLiteral("#ffb74d"))
+                                : QColor(QStringLiteral("#b26a00"));
         m_virtualCameraAvailable = false;
     } else {
         statusText = tr("Virtual camera support is disabled.\nInstall the module and load it with:\n%1")
                          .arg(modprobeCommand);
-        statusColor = QStringLiteral("#b71c1c");
+        statusColor = darkTheme ? QColor(QStringLiteral("#ef9a9a"))
+                                : QColor(QStringLiteral("#b71c1c"));
         m_virtualCameraAvailable = false;
     }
 
     m_virtualCameraStatusLabel->setText(statusText);
-    m_virtualCameraStatusLabel->setStyleSheet(QStringLiteral("color: %1;").arg(statusColor));
+    m_virtualCameraStatusLabel->setStyleSheet(
+        QStringLiteral("color: %1;").arg(statusColor.name()));
     if (m_virtualCameraCheckbox) {
         m_virtualCameraCheckbox->setToolTip(statusText);
     }

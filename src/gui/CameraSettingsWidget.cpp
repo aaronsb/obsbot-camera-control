@@ -97,8 +97,10 @@ CameraSettingsWidget::CameraSettingsWidget(CameraController *controller, QWidget
     antiFlickerLayout->addStretch();
     layout->addWidget(m_exposureGroupBox);
 
-    m_tiny4kDeviceGroup = new QGroupBox("Tiny 4K Device Controls", this);
+    m_tiny4kDeviceGroup = new QWidget(this);
     QVBoxLayout *deviceLayout = new QVBoxLayout(m_tiny4kDeviceGroup);
+    deviceLayout->setContentsMargins(0, 0, 0, 0);
+    deviceLayout->setSpacing(14);
 
     auto addUvcSlider = [this, groupLayout](const QString &label,
                                              QWidget *&rowWidget,
@@ -141,103 +143,84 @@ CameraSettingsWidget::CameraSettingsWidget(CameraController *controller, QWidget
     });
     groupLayout->addLayout(antiFlickerLayout);
 
-    QCheckBox *gestureTracking = new QCheckBox("Tracking Gesture", this);
+    QGroupBox *sleepGroup = new QGroupBox("Sleep", m_tiny4kDeviceGroup);
+    QVBoxLayout *sleepLayout = new QVBoxLayout(sleepGroup);
+    sleepLayout->setContentsMargins(16, 16, 16, 16);
+    sleepLayout->setSpacing(10);
+    QHBoxLayout *sleepTimeLayout = new QHBoxLayout();
+    sleepTimeLayout->addWidget(new QLabel("Sleep time:", sleepGroup));
+    QSpinBox *sleepTimeout = new QSpinBox(sleepGroup);
+    sleepTimeout->setRange(0, 65535);
+    sleepTimeout->setSuffix(" s");
+    sleepTimeout->setSpecialValueText("Disabled");
+    sleepTimeLayout->addWidget(sleepTimeout, 1);
+    sleepLayout->addLayout(sleepTimeLayout);
+
+    QTimer *sleepApplyTimer = new QTimer(this);
+    sleepApplyTimer->setSingleShot(true);
+    sleepApplyTimer->setInterval(400);
+    connect(sleepTimeout, QOverload<int>::of(&QSpinBox::valueChanged),
+            sleepApplyTimer, QOverload<>::of(&QTimer::start));
+    connect(sleepApplyTimer, &QTimer::timeout, this, [this, sleepTimeout]() {
+        m_controller->setSleepTimeout(sleepTimeout->value());
+    });
+
+    QHBoxLayout *powerLayout = new QHBoxLayout();
+    QPushButton *wakeButton = new QPushButton("Wake", sleepGroup);
+    connect(wakeButton, &QPushButton::clicked, this, [this]() {
+        m_controller->setDeviceAwake(true);
+    });
+    powerLayout->addWidget(wakeButton);
+    QPushButton *sleepButton = new QPushButton("Sleep", sleepGroup);
+    connect(sleepButton, &QPushButton::clicked, this, [this]() {
+        m_controller->setDeviceAwake(false);
+    });
+    powerLayout->addWidget(sleepButton);
+    sleepLayout->addLayout(powerLayout);
+    deviceLayout->addWidget(sleepGroup);
+
+    QGroupBox *gesturesGroup =
+        new QGroupBox("Gestures", m_tiny4kDeviceGroup);
+    QVBoxLayout *gesturesLayout = new QVBoxLayout(gesturesGroup);
+    gesturesLayout->setContentsMargins(16, 16, 16, 16);
+    QCheckBox *gestureTracking = new QCheckBox("Tracking", gesturesGroup);
     connect(gestureTracking, &QCheckBox::toggled, this, [this](bool enabled) {
         m_controller->setGestureControl(0, enabled);
     });
-    deviceLayout->addWidget(gestureTracking);
-    QCheckBox *gestureZoom = new QCheckBox("Zoom Gesture", this);
+    gesturesLayout->addWidget(gestureTracking);
+    QCheckBox *gestureZoom = new QCheckBox("Zoom", gesturesGroup);
     connect(gestureZoom, &QCheckBox::toggled, this, [this](bool enabled) {
         m_controller->setGestureControl(1, enabled);
     });
-    deviceLayout->addWidget(gestureZoom);
-    QCheckBox *hardwareMirror = new QCheckBox("Flip camera output (hardware)", this);
-    connect(hardwareMirror, &QCheckBox::toggled, this, [this](bool enabled) {
-        m_controller->setHardwareMirror(enabled);
+    gesturesLayout->addWidget(gestureZoom);
+    deviceLayout->addWidget(gesturesGroup);
+
+    QHBoxLayout *screenModeLayout = new QHBoxLayout();
+    screenModeLayout->addWidget(new QLabel("Screen mode:", m_tiny4kDeviceGroup));
+    QComboBox *screenMode = new QComboBox(m_tiny4kDeviceGroup);
+    screenMode->addItem("Landscape", false);
+    screenMode->addItem("Portrait", true);
+    connect(screenMode, QOverload<int>::of(&QComboBox::activated),
+            this, [this, screenMode](int index) {
+        const bool portrait = screenMode->itemData(index).toBool();
+        if (QMessageBox::warning(this, "Restart Camera",
+                "Changing screen mode restarts the camera. Continue?",
+                QMessageBox::Yes | QMessageBox::No) == QMessageBox::Yes) {
+            m_controller->setVerticalMode(portrait);
+        }
     });
-    deviceLayout->addWidget(hardwareMirror);
-    QCheckBox *aiEnabled = new QCheckBox("Global AI Enabled", this);
-    aiEnabled->setChecked(true);
-    connect(aiEnabled, &QCheckBox::toggled, this, [this](bool enabled) {
-        m_controller->setAiEnabled(enabled);
-    });
-    deviceLayout->addWidget(aiEnabled);
-    QCheckBox *sleepMicrophone = new QCheckBox("Microphone Available During Sleep", this);
+    screenModeLayout->addWidget(screenMode, 1);
+    deviceLayout->addLayout(screenModeLayout);
+
+    QCheckBox *sleepMicrophone =
+        new QCheckBox("Microphone available during sleep", m_tiny4kDeviceGroup);
     connect(sleepMicrophone, &QCheckBox::toggled, this, [this](bool enabled) {
         m_controller->setMicrophoneDuringSleep(enabled);
     });
     deviceLayout->addWidget(sleepMicrophone);
 
-    QHBoxLayout *sleepTimeoutLayout = new QHBoxLayout();
-    sleepTimeoutLayout->addWidget(new QLabel("Automatic sleep:", this));
-    QSpinBox *sleepTimeout = new QSpinBox(this);
-    sleepTimeout->setRange(0, 65535);
-    sleepTimeout->setSuffix(" s");
-    sleepTimeout->setSpecialValueText("Disabled");
-    sleepTimeoutLayout->addWidget(sleepTimeout);
-    QPushButton *applySleepTimeout = new QPushButton("Apply", this);
-    connect(applySleepTimeout, &QPushButton::clicked, this, [this, sleepTimeout]() {
-        m_controller->setSleepTimeout(sleepTimeout->value());
-    });
-    sleepTimeoutLayout->addWidget(applySleepTimeout);
-    deviceLayout->addLayout(sleepTimeoutLayout);
-
-    QHBoxLayout *powerLayout = new QHBoxLayout();
-    QPushButton *wakeButton = new QPushButton("Wake", this);
-    connect(wakeButton, &QPushButton::clicked, this, [this]() {
-        m_controller->setDeviceAwake(true);
-    });
-    powerLayout->addWidget(wakeButton);
-    QPushButton *sleepButton = new QPushButton("Sleep", this);
-    connect(sleepButton, &QPushButton::clicked, this, [this]() {
-        m_controller->setDeviceAwake(false);
-    });
-    powerLayout->addWidget(sleepButton);
-    QPushButton *bootPositionButton = new QPushButton("Use Current View at Boot", this);
-    connect(bootPositionButton, &QPushButton::clicked, this, [this]() {
-        m_controller->setCurrentViewAsBootPosition();
-    });
-    powerLayout->addWidget(bootPositionButton);
-    deviceLayout->addLayout(powerLayout);
-
-    QLabel *speedLabel = new QLabel("Continuous Gimbal Movement", this);
-    deviceLayout->addWidget(speedLabel);
-    QGridLayout *speedLayout = new QGridLayout();
-    auto addSpeedButton = [this, speedLayout](const QString &text, int row, int column,
-                                              double pitch, double pan) {
-        QPushButton *button = new QPushButton(text, this);
-        connect(button, &QPushButton::pressed, this, [this, pitch, pan]() {
-            m_controller->setGimbalSpeed(pitch, pan);
-        });
-        connect(button, &QPushButton::released, this, [this]() {
-            m_controller->setGimbalSpeed(0.0, 0.0);
-        });
-        speedLayout->addWidget(button, row, column);
-    };
-    addSpeedButton("↑", 0, 1, -30.0, 0.0);
-    addSpeedButton("←", 1, 0, 0.0, -45.0);
-    addSpeedButton("↓", 1, 1, 30.0, 0.0);
-    addSpeedButton("→", 1, 2, 0.0, 45.0);
-    deviceLayout->addLayout(speedLayout);
-
-    QHBoxLayout *dangerLayout = new QHBoxLayout();
-    QPushButton *verticalMode = new QPushButton("Enable Portrait Mode…", this);
-    connect(verticalMode, &QPushButton::clicked, this, [this]() {
-        if (QMessageBox::warning(this, "Restart Camera",
-                "Changing portrait mode restarts the camera. Enable portrait mode?",
-                QMessageBox::Yes | QMessageBox::No) == QMessageBox::Yes)
-            m_controller->setVerticalMode(true);
-    });
-    dangerLayout->addWidget(verticalMode);
-    QPushButton *landscapeMode = new QPushButton("Landscape Mode…", this);
-    connect(landscapeMode, &QPushButton::clicked, this, [this]() {
-        if (QMessageBox::warning(this, "Restart Camera",
-                "Changing landscape mode restarts the camera. Continue?",
-                QMessageBox::Yes | QMessageBox::No) == QMessageBox::Yes)
-            m_controller->setVerticalMode(false);
-    });
-    dangerLayout->addWidget(landscapeMode);
-    QPushButton *factoryReset = new QPushButton("Factory Reset…", this);
+    QPushButton *factoryReset =
+        new QPushButton("Factory Reset…", m_tiny4kDeviceGroup);
     connect(factoryReset, &QPushButton::clicked, this, [this]() {
         if (QMessageBox::critical(this, "Factory Reset",
                 "Reset every camera setting to its factory default? This cannot be undone.",
@@ -245,8 +228,7 @@ CameraSettingsWidget::CameraSettingsWidget(CameraController *controller, QWidget
                 QMessageBox::Cancel) == QMessageBox::Reset)
             m_controller->restoreFactorySettings();
     });
-    dangerLayout->addWidget(factoryReset);
-    deviceLayout->addLayout(dangerLayout);
+    deviceLayout->addWidget(factoryReset);
     // Remaining device-specific actions are exposed on the More tab.
 
     // Image Controls Group

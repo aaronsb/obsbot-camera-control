@@ -27,7 +27,7 @@ public:
     void updateFromState(const CameraController::CameraState &state);
     void setV4l2Mode(bool v4l2Only);
     void insertWidgetAt(int index, QWidget *widget);
-    QGroupBox *moreGroup() const { return m_tiny4kDeviceGroup; }
+    QWidget *moreGroup() const { return m_tiny4kDeviceGroup; }
 
     // Getters for current UI state
     bool isHDREnabled() const { return m_hdrCheckBox->isChecked(); }
@@ -192,7 +192,7 @@ private:
     QGroupBox *m_exposureGroupBox;
     QGroupBox *m_whiteBalanceGroupBox;
     QGroupBox *m_imageGroupBox;
-    QGroupBox *m_tiny4kDeviceGroup;
+    QWidget *m_tiny4kDeviceGroup;
     QSlider *m_uvcExposureSlider;
     QSlider *m_gainSlider;
     QSlider *m_backlightSlider;

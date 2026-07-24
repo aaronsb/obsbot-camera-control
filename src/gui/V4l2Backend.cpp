@@ -165,13 +165,14 @@ bool V4l2Backend::setAutoExposure(bool automatic)
 {
     return setControl(V4L2_CID_EXPOSURE_AUTO,
                       automatic
-                          ? V4L2_EXPOSURE_APERTURE_PRIORITY
+                          ? V4L2_EXPOSURE_SHUTTER_PRIORITY
                           : V4L2_EXPOSURE_MANUAL);
 }
 bool V4l2Backend::getAutoExposure()
 {
     const int mode = getControl(V4L2_CID_EXPOSURE_AUTO);
     return mode == V4L2_EXPOSURE_AUTO
+        || mode == V4L2_EXPOSURE_SHUTTER_PRIORITY
         || mode == V4L2_EXPOSURE_APERTURE_PRIORITY;
 }
 

@@ -1,11 +1,14 @@
 #include "VideoEffectsWidget.h"
 
+#include <algorithm>
 #include <QCheckBox>
 #include <QColorDialog>
+#include <QFont>
 #include <QFormLayout>
 #include <QGroupBox>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QPalette>
 #include <QPushButton>
 #include <QSlider>
 #include <QVBoxLayout>
@@ -60,7 +63,10 @@ VideoEffectsWidget::VideoEffectsWidget(QWidget *parent)
            "They do not change the physical camera output."),
         this);
     infoLabel->setWordWrap(true);
-    infoLabel->setStyleSheet("color: palette(mid); font-size: 11px;");
+    infoLabel->setForegroundRole(QPalette::PlaceholderText);
+    QFont infoFont = infoLabel->font();
+    infoFont.setPointSizeF(std::max(1.0, infoFont.pointSizeF() - 1.0));
+    infoLabel->setFont(infoFont);
     rootLayout->addWidget(infoLabel);
 
     auto addSlider = [&](QVBoxLayout *groupLayout, const QString &label, float min, float max, float initial, std::function<void(float)> setter) {

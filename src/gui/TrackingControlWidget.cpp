@@ -1,5 +1,8 @@
 #include "TrackingControlWidget.h"
+#include <algorithm>
+#include <QFont>
 #include <QLabel>
+#include <QPalette>
 #include <dev/dev.hpp>
 
 TrackingControlWidget::TrackingControlWidget(CameraController *controller, QWidget *parent)
@@ -28,7 +31,6 @@ TrackingControlWidget::TrackingControlWidget(CameraController *controller, QWidg
     layout->setSpacing(14);
 
     m_trackingGroupBox = new QGroupBox("AI Tracking", this);
-    m_trackingGroupBox->setFlat(true);
     QVBoxLayout *groupLayout = new QVBoxLayout(m_trackingGroupBox);
     groupLayout->setContentsMargins(16, 16, 16, 16);
     groupLayout->setSpacing(12);
@@ -171,7 +173,6 @@ TrackingControlWidget::TrackingControlWidget(CameraController *controller, QWidg
 
     // Focus remains available while auto-framing is enabled.
     m_focusGroupBox = new QGroupBox("Focus", this);
-    m_focusGroupBox->setFlat(true);
     QVBoxLayout *focusGroupLayout = new QVBoxLayout(m_focusGroupBox);
     focusGroupLayout->setContentsMargins(16, 16, 16, 16);
     focusGroupLayout->setSpacing(8);
@@ -203,7 +204,6 @@ TrackingControlWidget::TrackingControlWidget(CameraController *controller, QWidg
     ptzContainerLayout->setSpacing(0);
 
     QGroupBox *ptzGroupBox = new QGroupBox("Vision and Gimbal", this);
-    ptzGroupBox->setFlat(true);
     QVBoxLayout *ptzGroupLayout = new QVBoxLayout(ptzGroupBox);
     ptzGroupLayout->setContentsMargins(16, 16, 16, 16);
     ptzGroupLayout->setSpacing(12);
@@ -240,7 +240,10 @@ TrackingControlWidget::TrackingControlWidget(CameraController *controller, QWidg
     // Position label (full width below both columns)
     m_positionLabel = new QLabel("Position: Pan 0.00, Tilt 0.00", this);
     m_positionLabel->setAlignment(Qt::AlignCenter);
-    m_positionLabel->setStyleSheet("color: palette(mid); font-size: 11px;");
+    m_positionLabel->setForegroundRole(QPalette::PlaceholderText);
+    QFont positionFont = m_positionLabel->font();
+    positionFont.setPointSizeF(std::max(1.0, positionFont.pointSizeF() - 1.0));
+    m_positionLabel->setFont(positionFont);
     ptzGroupLayout->addWidget(m_positionLabel);
     ptzGroupLayout->addWidget(zoomControls);
 

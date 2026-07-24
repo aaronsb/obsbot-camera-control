@@ -223,11 +223,11 @@ CameraSettingsWidget::CameraSettingsWidget(CameraController *controller, QWidget
     deviceLayout->addLayout(screenModeLayout);
 
     QCheckBox *sleepMicrophone =
-        new QCheckBox("Microphone available during sleep", m_tiny4kDeviceGroup);
+        new QCheckBox("Microphone available during sleep", sleepGroup);
     connect(sleepMicrophone, &QCheckBox::toggled, this, [this](bool enabled) {
         m_controller->setMicrophoneDuringSleep(enabled);
     });
-    deviceLayout->addWidget(sleepMicrophone);
+    sleepLayout->addWidget(sleepMicrophone);
 
     QPushButton *factoryReset =
         new QPushButton("Factory Reset…", m_tiny4kDeviceGroup);

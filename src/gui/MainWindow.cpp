@@ -558,7 +558,11 @@ void MainWindow::setupUI()
 
     QLabel *snapshotHint = new QLabel(tr("Use Copy to also place the image on the clipboard. Leave blank for the default path shown above."), snapshotGroup);
     snapshotHint->setWordWrap(true);
-    snapshotHint->setStyleSheet("color: palette(mid); font-size: 11px;");
+    snapshotHint->setForegroundRole(QPalette::PlaceholderText);
+    QFont snapshotHintFont = snapshotHint->font();
+    snapshotHintFont.setPointSizeF(
+        std::max(1.0, snapshotHintFont.pointSizeF() - 1.0));
+    snapshotHint->setFont(snapshotHintFont);
     snapshotLayout->addWidget(snapshotHint);
 
     settingsPageLayout->addWidget(snapshotGroup);

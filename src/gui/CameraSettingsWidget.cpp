@@ -38,6 +38,13 @@ CameraSettingsWidget::CameraSettingsWidget(CameraController *controller, QWidget
     QVBoxLayout *groupLayout = new QVBoxLayout(m_exposureGroupBox);
     groupLayout->setContentsMargins(16, 16, 16, 16);
     groupLayout->setSpacing(10);
+    constexpr int controlLabelWidth = 90;
+
+    auto alignedLabel = [this](const QString &text) {
+        auto *label = new QLabel(text, this);
+        label->setMinimumWidth(controlLabelWidth);
+        return label;
+    };
 
     // Retained as an internal state holder for configuration and image
     // presets; the visible controls live beside the Zoom slider.
@@ -105,16 +112,16 @@ CameraSettingsWidget::CameraSettingsWidget(CameraController *controller, QWidget
     deviceLayout->setContentsMargins(0, 0, 0, 0);
     deviceLayout->setSpacing(14);
 
-    auto addUvcSlider = [this, groupLayout](const QString &label,
+    auto addUvcSlider = [this, groupLayout, alignedLabel](const QString &label,
                                              QWidget *&rowWidget,
                                              QSlider *&slider,
                                              auto setter) {
         rowWidget = new QWidget(this);
         QHBoxLayout *row = new QHBoxLayout(rowWidget);
         row->setContentsMargins(0, 0, 0, 0);
-        row->addWidget(new QLabel(label, this));
+        row->addWidget(alignedLabel(label));
         slider = new QSlider(Qt::Horizontal, this);
-        row->addWidget(slider);
+        row->addWidget(slider, 1);
         QPushButton *reset = new QPushButton("Reset", this);
         row->addWidget(reset);
         connect(slider, &QSlider::valueChanged, this, [this, setter](int value) {
@@ -247,12 +254,12 @@ CameraSettingsWidget::CameraSettingsWidget(CameraController *controller, QWidget
     m_brightnessAutoCheckBox->setToolTip("Enable automatic brightness (disables manual control)");
     connect(m_brightnessAutoCheckBox, &QCheckBox::toggled, this, &CameraSettingsWidget::onBrightnessAutoToggled);
     brightnessLayout->addWidget(m_brightnessAutoCheckBox);
-    brightnessLayout->addWidget(new QLabel("Brightness:", this));
+    brightnessLayout->addWidget(alignedLabel("Brightness:"));
     m_brightnessSlider = new QSlider(Qt::Horizontal, this);
     m_brightnessSlider->setRange(0, 255);
     m_brightnessSlider->setToolTip("Adjust image brightness (0-255)");
     connect(m_brightnessSlider, &QSlider::valueChanged, this, &CameraSettingsWidget::onBrightnessChanged);
-    brightnessLayout->addWidget(m_brightnessSlider);
+    brightnessLayout->addWidget(m_brightnessSlider, 1);
     QPushButton *brightnessReset = new QPushButton("Reset", this);
     connect(brightnessReset, &QPushButton::clicked, this, [this]() {
         const auto range = m_controller->getBrightnessRange();
@@ -271,12 +278,12 @@ CameraSettingsWidget::CameraSettingsWidget(CameraController *controller, QWidget
     m_contrastAutoCheckBox->setToolTip("Enable automatic contrast (disables manual control)");
     connect(m_contrastAutoCheckBox, &QCheckBox::toggled, this, &CameraSettingsWidget::onContrastAutoToggled);
     contrastLayout->addWidget(m_contrastAutoCheckBox);
-    contrastLayout->addWidget(new QLabel("Contrast:", this));
+    contrastLayout->addWidget(alignedLabel("Contrast:"));
     m_contrastSlider = new QSlider(Qt::Horizontal, this);
     m_contrastSlider->setRange(0, 255);
     m_contrastSlider->setToolTip("Adjust image contrast (0-255)");
     connect(m_contrastSlider, &QSlider::valueChanged, this, &CameraSettingsWidget::onContrastChanged);
-    contrastLayout->addWidget(m_contrastSlider);
+    contrastLayout->addWidget(m_contrastSlider, 1);
     QPushButton *contrastReset = new QPushButton("Reset", this);
     connect(contrastReset, &QPushButton::clicked, this, [this]() {
         const auto range = m_controller->getContrastRange();
@@ -295,12 +302,12 @@ CameraSettingsWidget::CameraSettingsWidget(CameraController *controller, QWidget
     m_saturationAutoCheckBox->setToolTip("Enable automatic saturation (disables manual control)");
     connect(m_saturationAutoCheckBox, &QCheckBox::toggled, this, &CameraSettingsWidget::onSaturationAutoToggled);
     saturationLayout->addWidget(m_saturationAutoCheckBox);
-    saturationLayout->addWidget(new QLabel("Saturation:", this));
+    saturationLayout->addWidget(alignedLabel("Saturation:"));
     m_saturationSlider = new QSlider(Qt::Horizontal, this);
     m_saturationSlider->setRange(0, 255);
     m_saturationSlider->setToolTip("Adjust color saturation (0-255)");
     connect(m_saturationSlider, &QSlider::valueChanged, this, &CameraSettingsWidget::onSaturationChanged);
-    saturationLayout->addWidget(m_saturationSlider);
+    saturationLayout->addWidget(m_saturationSlider, 1);
     QPushButton *saturationReset = new QPushButton("Reset", this);
     connect(saturationReset, &QPushButton::clicked, this, [this]() {
         const auto range = m_controller->getSaturationRange();
@@ -313,11 +320,11 @@ CameraSettingsWidget::CameraSettingsWidget(CameraController *controller, QWidget
     imageLayout->addLayout(saturationLayout);
 
     QHBoxLayout *hueLayout = new QHBoxLayout();
-    hueLayout->addWidget(new QLabel("Hue:", this));
+    hueLayout->addWidget(alignedLabel("Hue:"));
     m_hueSlider = new QSlider(Qt::Horizontal, this);
     m_hueSlider->setRange(0, 100);
     connect(m_hueSlider, &QSlider::valueChanged, this, &CameraSettingsWidget::onHueChanged);
-    hueLayout->addWidget(m_hueSlider);
+    hueLayout->addWidget(m_hueSlider, 1);
     QPushButton *hueReset = new QPushButton("Reset", this);
     connect(hueReset, &QPushButton::clicked, this, [this]() {
         const auto range = m_controller->getHueRange();
@@ -330,12 +337,12 @@ CameraSettingsWidget::CameraSettingsWidget(CameraController *controller, QWidget
     hueLayout->addWidget(hueReset);
 
     QHBoxLayout *sharpnessLayout = new QHBoxLayout();
-    sharpnessLayout->addWidget(new QLabel("Sharpness:", this));
+    sharpnessLayout->addWidget(alignedLabel("Sharpness:"));
     m_sharpnessSlider = new QSlider(Qt::Horizontal, this);
     m_sharpnessSlider->setRange(0, 100);
     connect(m_sharpnessSlider, &QSlider::valueChanged,
             this, &CameraSettingsWidget::onSharpnessChanged);
-    sharpnessLayout->addWidget(m_sharpnessSlider);
+    sharpnessLayout->addWidget(m_sharpnessSlider, 1);
     QPushButton *sharpnessReset = new QPushButton("Reset", this);
     connect(sharpnessReset, &QPushButton::clicked, this, [this]() {
         const auto range = m_controller->getSharpnessRange();

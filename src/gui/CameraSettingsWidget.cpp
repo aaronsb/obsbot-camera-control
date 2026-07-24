@@ -61,7 +61,10 @@ CameraSettingsWidget::CameraSettingsWidget(CameraController *controller, QWidget
 
     QHBoxLayout *exposureLayout = new QHBoxLayout();
     m_exposureAutoCheckBox = new QCheckBox("Auto Exposure", this);
-    m_exposureAutoCheckBox->setToolTip("Continuously adapt exposure to changing light");
+    m_exposureAutoCheckBox->setToolTip(
+        "<b>Shutter Priority</b><br>"
+        "Keeps exposure time camera-managed and relatively short. "
+        "It does not automatically increase image brightness or gain.");
     connect(m_exposureAutoCheckBox, &QCheckBox::toggled,
             this, &CameraSettingsWidget::onExposureAutoToggled);
     exposureLayout->addWidget(m_exposureAutoCheckBox);

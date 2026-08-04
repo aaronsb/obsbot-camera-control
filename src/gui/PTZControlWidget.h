@@ -34,6 +34,7 @@ public:
     };
     void applyPresetStates(const std::array<PresetState, 3> &presets);
     std::array<PresetState, 3> currentPresets() const;
+    bool recallPreset(int index);
 
     struct ImagePresetState {
         bool defined;
@@ -66,6 +67,7 @@ private slots:
 private:
     CameraController *m_controller;
     CameraSettingsWidget *m_settingsWidget;
+    bool m_cameraAvailable;
 
     struct PresetUi {
         QPushButton *recallButton;

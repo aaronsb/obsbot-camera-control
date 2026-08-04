@@ -263,6 +263,24 @@ When window is shown/restored:
 - Click "Show Camera Preview" again
 - Note: Controls work without preview!
 
+### Position Presets and Shortcuts
+1. Turn off auto-framing, then use **Tracking → Manual Camera Control** to frame the view.
+2. Include the desired zoom level—the saved zoom provides a repeatable crop around the paper or subject.
+3. Open **Presets** and save the position to slot 1, 2, or 3.
+4. Recall it with the slot's **Recall** button or `Ctrl+1`, `Ctrl+2`, or `Ctrl+3` while OBSBOT Control is active.
+
+For a desktop-wide hotkey (including while another application is active), bind one of these commands in your desktop environment's keyboard-shortcut settings:
+
+```bash
+obsbot-cli --preset 1
+obsbot-cli --preset 2
+obsbot-cli --preset 3
+```
+
+Use `obsbot-cli --list-presets` to inspect saved slots. If multiple OBSBOT cameras are connected, add `--serial SERIAL` so a shortcut cannot target the wrong camera.
+
+Position presets store pan, tilt, and zoom. They do not detect paper edges. Tiny 2-family cameras can also try the camera's model-specific **Desk** tracking mode, but support and framing behavior vary by model and firmware.
+
 ### Settings not saving
 - Check config directory exists: `~/.config/obsbot-control/`
 - Verify write permissions
@@ -282,6 +300,14 @@ A CLI tool is also included for automation/scripting:
 ```
 
 See CLI help for available commands.
+
+Useful automation commands:
+
+```bash
+obsbot-cli --list-presets              # Show saved position slots
+obsbot-cli --preset 1                  # Recall slot 1
+obsbot-cli --preset 1 --serial ABC123  # Select an exact camera
+```
 
 ## Project Structure
 

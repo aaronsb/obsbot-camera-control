@@ -76,6 +76,12 @@ target_compile_definitions(obsbot-gui PRIVATE
 # CLI Application
 add_executable(obsbot-cli
     src/cli/meet2_test.cpp
+    src/cli/CliOptions.cpp
+    src/cli/CliOptions.h
+    src/cli/CameraSelection.cpp
+    src/cli/CameraSelection.h
+    src/cli/PresetCommand.cpp
+    src/cli/PresetCommand.h
     src/common/Config.cpp
     src/common/Config.h
 )
@@ -104,3 +110,26 @@ set_target_properties(obsbot-cli PROPERTIES
     BUILD_RPATH "${SDK_LIB_DIR}"
     INSTALL_RPATH "/usr/lib"
 )
+
+include(CTest)
+if(BUILD_TESTING)
+    add_executable(cli-options-test
+        tests/CliOptionsTest.cpp
+        src/cli/CliOptions.cpp
+        src/cli/CliOptions.h
+    )
+    target_include_directories(cli-options-test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src/cli
+    )
+    add_test(NAME cli-options COMMAND cli-options-test)
+
+    add_executable(config-preset-validation-test
+        tests/ConfigPresetValidationTest.cpp
+        src/common/Config.cpp
+        src/common/Config.h
+    )
+    target_include_directories(config-preset-validation-test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src/common
+    )
+    add_test(NAME config-preset-validation COMMAND config-preset-validation-test)
+endif()

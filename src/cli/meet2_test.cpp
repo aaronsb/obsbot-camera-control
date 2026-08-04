@@ -1,10 +1,12 @@
-#include <iostream>
-#include <thread>
 #include <chrono>
+#include <iostream>
 #include <string>
-#include <cstring>
+#include <thread>
 #include <dev/devs.hpp>
+#include "CameraSelection.h"
+#include "CliOptions.h"
 #include "Config.h"
+#include "PresetCommand.h"
 
 using namespace std;
 
@@ -15,97 +17,87 @@ void runInteractiveMode(shared_ptr<Device> dev);
 
 int main(int argc, char **argv)
 {
-    bool interactive = false;
-
-    // Parse command line arguments
-    for (int i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "-i") == 0 || strcmp(argv[i], "--interactive") == 0) {
-            interactive = true;
-        } else if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
-            cout << "OBSBOT Control - CLI Tool" << endl;
-            cout << "\nUsage: " << argv[0] << " [options]" << endl;
-            cout << "\nOptions:" << endl;
-            cout << "  -i, --interactive    Run in interactive menu mode" << endl;
-            cout << "  -h, --help           Show this help message" << endl;
-            cout << "\nDefault behavior:" << endl;
-            cout << "  Loads configuration from ~/.config/obsbot-control/settings.conf" << endl;
-            cout << "  Applies settings to camera and exits" << endl;
-            return 0;
-        }
+    const CliParseResult parsed = parseCliOptions(argc, argv);
+    if (!parsed.ok()) {
+        cerr << "Error: " << parsed.error << "\n\n";
+        printCliUsage(cerr, argv[0]);
+        return 2;
+    }
+    if (parsed.options.showHelp) {
+        printCliUsage(cout, argv[0]);
+        return 0;
     }
 
+    const CliAction action = parsed.options.action;
+    const bool interactive = action == CliAction::Interactive;
     cout << "OBSBOT Control" << (interactive ? " - Interactive Mode" : "") << endl;
 
-    // Load configuration
     Config config;
     vector<Config::ValidationError> errors;
     if (!config.load(errors)) {
-        // Config has validation errors
+        if (action == CliAction::RecallPreset || action == CliAction::ListPresets) {
+            cerr << "Configuration is invalid; preset actions never prompt for input." << endl;
+            for (const auto &error : errors) {
+                cerr << (error.lineNumber > 0 ? "Line " + to_string(error.lineNumber) + ": " : "")
+                     << error.message << endl;
+            }
+            return 2;
+        }
         if (!handleConfigErrors(config)) {
             cout << "Continuing without saving settings." << endl;
         }
+    } else if (!config.configExists()) {
+        cout << "No config file found. Using defaults." << endl;
     } else {
-        if (!config.configExists()) {
-            cout << "No config file found. Using defaults." << endl;
-        } else {
-            cout << "Configuration loaded from: " << config.getConfigPath() << endl;
+        cout << "Configuration loaded from: " << config.getConfigPath() << endl;
+    }
+
+    const auto settings = config.getSettings();
+    if (action == CliAction::ListPresets) {
+        printPresetList(cout, settings);
+        return 0;
+    }
+
+    const Config::CameraSettings::PresetSlot *requestedPreset = nullptr;
+    if (action == CliAction::RecallPreset) {
+        requestedPreset = &settings.presets[static_cast<size_t>(parsed.options.presetNumber - 1)];
+        if (!requestedPreset->defined) {
+            cerr << "Preset " << parsed.options.presetNumber
+                 << " is empty. Save it in the GUI before recalling it." << endl;
+            return 2;
         }
     }
 
-    // Device detection callback
-    bool device_connected = false;
-    auto onDevChanged = [&device_connected](std::string dev_sn, bool connected, void *param) {
-        if (connected) {
-            cout << "Device " << dev_sn << " connected" << endl;
-            device_connected = true;
-        } else {
-            cout << "Device " << dev_sn << " disconnected" << endl;
-        }
-    };
-
-    // Register device detection
-    Devices::get().setDevChangedCallback(onDevChanged, nullptr);
-    Devices::get().setEnableMdnsScan(false);  // USB only
-
-    // Wait for device detection with timeout
-    cout << "Waiting for OBSBOT camera..." << endl;
-    const int timeout_seconds = 10;
-    for (int i = 0; i < timeout_seconds * 10; i++) {
-        if (device_connected) {
-            // Give a moment for device list to be populated after callback
-            this_thread::sleep_for(chrono::milliseconds(200));
-            break;
-        }
-        this_thread::sleep_for(chrono::milliseconds(100));
-    }
-
-    auto dev_list = Devices::get().getDevList();
-    if (dev_list.empty()) {
-        cout << "No OBSBOT devices found!" << endl;
+    const auto dev = waitForSelectedCamera(
+        parsed.options.serial,
+        action == CliAction::RecallPreset,
+        10,
+        cout,
+        cerr);
+    if (!dev) {
         return 1;
     }
 
-    // Get first device
-    auto dev = dev_list.front();
     cout << "\nFound device:" << endl;
     cout << "  Name: " << dev->devName() << endl;
     cout << "  SN: " << dev->devSn() << endl;
     cout << "  Version: " << dev->devVersion() << endl;
     cout << "  Product Type: " << dev->productType() << endl;
 
-    // Note: This app was primarily tested with Meet 2, but may work with other models
     if (dev->productType() != ObsbotProdMeet2) {
         cout << "\nNote: This camera is not a Meet 2." << endl;
         cout << "      Some features may not work as expected." << endl;
     }
 
-    if (interactive) {
-        // Interactive mode - run menu
+    if (action == CliAction::RecallPreset) {
+        if (!applyPresetToCamera(dev, *requestedPreset, cout, cerr)) {
+            return 1;
+        }
+        cout << "Position preset " << parsed.options.presetNumber << " recalled." << endl;
+    } else if (interactive) {
         runInteractiveMode(dev);
     } else {
-        // Non-interactive mode - apply config and exit
         cout << "\nApplying configuration to camera..." << endl;
-        auto settings = config.getSettings();
         applyConfigToCamera(dev, settings);
         cout << "Configuration applied successfully." << endl;
         cout << "Camera settings have been updated." << endl;

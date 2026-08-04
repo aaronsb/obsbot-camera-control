@@ -5,6 +5,7 @@
 #include <cstdlib>
 #include <unordered_set>
 #include <algorithm>
+#include <cmath>
 #include <sys/stat.h>
 #include <sys/types.h>
 
@@ -264,6 +265,16 @@ bool Config::parseLine(const std::string &line, int lineNumber, std::vector<Vali
         return false;
     };
 
+    auto parseFiniteDouble = [](const std::string &val, double &out) -> bool {
+        try {
+            size_t consumed = 0;
+            out = std::stod(val, &consumed);
+            return consumed == val.size() && std::isfinite(out);
+        } catch (...) {
+            return false;
+        }
+    };
+
     for (int i = 0; i < 3; ++i) {
         std::string base = "preset" + std::to_string(i + 1) + "_";
         if (key.rfind(base, 0) == 0) {
@@ -277,43 +288,40 @@ bool Config::parseLine(const std::string &line, int lineNumber, std::vector<Vali
                 }
                 return true;
             } else if (suffix == "pan") {
-                try {
-                    double pan = std::stod(value);
-                    if (pan < -1.0 || pan > 1.0) {
-                        addError(InvalidValue, base + "pan must be between -1.0 and 1.0");
-                        return false;
-                    }
-                    preset.pan = pan;
-                } catch (...) {
+                double pan = 0.0;
+                if (!parseFiniteDouble(value, pan)) {
                     addError(InvalidValue, base + "pan must be a number between -1.0 and 1.0");
                     return false;
                 }
+                if (pan < -1.0 || pan > 1.0) {
+                    addError(InvalidValue, base + "pan must be between -1.0 and 1.0");
+                    return false;
+                }
+                preset.pan = pan;
                 return true;
             } else if (suffix == "tilt") {
-                try {
-                    double tilt = std::stod(value);
-                    if (tilt < -1.0 || tilt > 1.0) {
-                        addError(InvalidValue, base + "tilt must be between -1.0 and 1.0");
-                        return false;
-                    }
-                    preset.tilt = tilt;
-                } catch (...) {
+                double tilt = 0.0;
+                if (!parseFiniteDouble(value, tilt)) {
                     addError(InvalidValue, base + "tilt must be a number between -1.0 and 1.0");
                     return false;
                 }
+                if (tilt < -1.0 || tilt > 1.0) {
+                    addError(InvalidValue, base + "tilt must be between -1.0 and 1.0");
+                    return false;
+                }
+                preset.tilt = tilt;
                 return true;
             } else if (suffix == "zoom") {
-                try {
-                    double zoom = std::stod(value);
-                    if (zoom < 1.0 || zoom > 2.0) {
-                        addError(InvalidValue, base + "zoom must be between 1.0 and 2.0");
-                        return false;
-                    }
-                    preset.zoom = zoom;
-                } catch (...) {
+                double zoom = 0.0;
+                if (!parseFiniteDouble(value, zoom)) {
                     addError(InvalidValue, base + "zoom must be a number between 1.0 and 2.0");
                     return false;
                 }
+                if (zoom < 1.0 || zoom > 2.0) {
+                    addError(InvalidValue, base + "zoom must be between 1.0 and 2.0");
+                    return false;
+                }
+                preset.zoom = zoom;
                 return true;
             }
         }
@@ -656,13 +664,13 @@ bool Config::validateSettings(std::vector<ValidationError> &errors)
         if (!preset.defined) {
             continue;
         }
-        if (preset.pan < -1.0 || preset.pan > 1.0) {
+        if (!std::isfinite(preset.pan) || preset.pan < -1.0 || preset.pan > 1.0) {
             addError("preset" + std::to_string(i + 1) + "_pan out of range (must be -1.0 to 1.0)");
         }
-        if (preset.tilt < -1.0 || preset.tilt > 1.0) {
+        if (!std::isfinite(preset.tilt) || preset.tilt < -1.0 || preset.tilt > 1.0) {
             addError("preset" + std::to_string(i + 1) + "_tilt out of range (must be -1.0 to 1.0)");
         }
-        if (preset.zoom < 1.0 || preset.zoom > 2.0) {
+        if (!std::isfinite(preset.zoom) || preset.zoom < 1.0 || preset.zoom > 2.0) {
             addError("preset" + std::to_string(i + 1) + "_zoom out of range (must be 1.0 to 2.0)");
         }
     }

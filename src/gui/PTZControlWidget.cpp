@@ -2,15 +2,33 @@
 #include "CameraSettingsWidget.h"
 #include <QVBoxLayout>
 #include <QHBoxLayout>
+#include <QKeySequence>
+#include <QShortcut>
+#include <cmath>
 
 PTZControlWidget::PTZControlWidget(CameraController *controller, QWidget *parent)
     : QWidget(parent)
     , m_controller(controller)
     , m_settingsWidget(nullptr)
+    , m_cameraAvailable(controller->isConnected())
 {
     QVBoxLayout *layout = new QVBoxLayout(this);
     layout->setContentsMargins(8, 14, 8, 14);
     layout->setSpacing(14);
+
+    connect(m_controller, &CameraController::cameraConnected, this,
+            [this](const CameraController::CameraInfo &) {
+                m_cameraAvailable = true;
+                for (int i = 0; i < static_cast<int>(m_presets.size()); ++i) {
+                    updatePresetLabel(i);
+                }
+            });
+    connect(m_controller, &CameraController::cameraDisconnected, this, [this]() {
+        m_cameraAvailable = false;
+        for (int i = 0; i < static_cast<int>(m_presets.size()); ++i) {
+            updatePresetLabel(i);
+        }
+    });
 
     // Presets section
     QGroupBox *presetGroup = new QGroupBox("Camera Presets", this);
@@ -39,6 +57,14 @@ PTZControlWidget::PTZControlWidget(CameraController *controller, QWidget *parent
         presetUi.recallButton->setProperty("presetIndex", i);
         presetUi.recallButton->setEnabled(false);
         connect(presetUi.recallButton, &QPushButton::clicked, this, &PTZControlWidget::onRecallPreset);
+        const QKeySequence shortcutKey(QString("Ctrl+%1").arg(i + 1));
+        presetUi.recallButton->setToolTip(
+            QString("Recall this position (%1)").arg(shortcutKey.toString(QKeySequence::NativeText)));
+        auto *shortcut = new QShortcut(shortcutKey, this);
+        shortcut->setContext(Qt::ApplicationShortcut);
+        connect(shortcut, &QShortcut::activated, this, [this, i]() {
+            recallPreset(i);
+        });
         row->addWidget(presetUi.recallButton);
 
         presetUi.saveButton = new QPushButton("Save", this);
@@ -52,6 +78,9 @@ PTZControlWidget::PTZControlWidget(CameraController *controller, QWidget *parent
     }
 
     layout->addWidget(presetGroup);
+
+    QLabel *shortcutHint = new QLabel("Recall shortcuts: Ctrl+1, Ctrl+2, Ctrl+3", this);
+    presetLayout->addWidget(shortcutHint);
 
     // Image Quality Presets section
     QGroupBox *imagePresetGroup = new QGroupBox("Image Quality Presets", this);
@@ -115,28 +144,39 @@ std::array<PTZControlWidget::PresetState, 3> PTZControlWidget::currentPresets() 
     return out;
 }
 
+bool PTZControlWidget::recallPreset(int index)
+{
+    if (!m_cameraAvailable || index < 0 || index >= static_cast<int>(m_presets.size())) {
+        return false;
+    }
+
+    const auto &preset = m_presets[static_cast<size_t>(index)];
+    const bool valid = std::isfinite(preset.pan) && preset.pan >= -1.0 && preset.pan <= 1.0
+        && std::isfinite(preset.tilt) && preset.tilt >= -1.0 && preset.tilt <= 1.0
+        && std::isfinite(preset.zoom) && preset.zoom >= 1.0 && preset.zoom <= 2.0;
+    if (!preset.defined || !valid) {
+        return false;
+    }
+
+    const bool panTiltApplied = m_controller->setPanTilt(preset.pan, preset.tilt);
+    const bool zoomApplied = m_controller->setZoom(preset.zoom);
+    return panTiltApplied && zoomApplied;
+}
+
 void PTZControlWidget::onRecallPreset()
 {
     auto *button = qobject_cast<QPushButton*>(sender());
-    if (!button) {
-        return;
+    if (button) {
+        recallPreset(button->property("presetIndex").toInt());
     }
-    int index = button->property("presetIndex").toInt();
-    if (index < 0 || index >= static_cast<int>(m_presets.size())) {
-        return;
-    }
-
-    auto &preset = m_presets[static_cast<size_t>(index)];
-    if (!preset.defined) {
-        return;
-    }
-
-    m_controller->setPanTilt(preset.pan, preset.tilt);
-    m_controller->setZoom(preset.zoom);
 }
 
 void PTZControlWidget::onStorePreset()
 {
+    if (!m_cameraAvailable) {
+        return;
+    }
+
     auto *button = qobject_cast<QPushButton*>(sender());
     if (!button) {
         return;
@@ -178,7 +218,10 @@ void PTZControlWidget::updatePresetLabel(int index)
     }
 
     if (preset.recallButton) {
-        preset.recallButton->setEnabled(preset.defined);
+        preset.recallButton->setEnabled(m_cameraAvailable && preset.defined);
+    }
+    if (preset.saveButton) {
+        preset.saveButton->setEnabled(m_cameraAvailable);
     }
 }
 

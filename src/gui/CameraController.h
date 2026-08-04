@@ -6,10 +6,13 @@
 #include <QMap>
 #include <memory>
 #include <functional>
+#include <optional>
 #include <vector>
 #include <dev/devs.hpp>
 #include "Config.h"
 #include "V4l2Backend.h"
+
+struct CameraControllerTestAccess;
 
 /**
  * @brief Handles all camera communication and state management
@@ -43,6 +46,9 @@ public:
         double pan;
         double tilt;
         double zoom;
+        bool panTiltKnown;
+        bool zoomKnown;
+        bool imageSettingsKnown;
 
         // Image settings
         bool hdrEnabled;
@@ -82,10 +88,16 @@ public:
     bool isConnected() const { return m_connected; }
     bool isV4l2Only() const { return m_v4l2Only; }
     CameraInfo getCameraInfo() const { return m_cameraInfo; }
+    void selectCameraTarget(
+        const QString &devicePath, const QString &serialNumber = QString());
     void connectToCamera();
-    void connectToCamera(const QString &devicePath);
+    void connectToCamera(
+        const QString &devicePath,
+        const QString &serialNumber = QString());
     void disconnectFromCamera();
     QString getVideoDevicePath() const;
+    QString selectedDevicePath() const { return m_selectedDevicePath; }
+    QString selectedDeviceSerial() const { return m_selectedDeviceSerial; }
     QMap<QString, QString> getSerialsByDevicePath() const;
 
     // State
@@ -93,9 +105,20 @@ public:
     bool hasTiny2Capabilities() const;
 
     // Tracking controls
+    struct TrackingTransitionResult {
+        bool trackingModeApplied = false;
+        bool autoZoomApplied = true;
+        bool confirmationPending = false;
+        quint64 intentGeneration = 0;
+        bool complete() const { return trackingModeApplied && autoZoomApplied; }
+    };
+
     bool enableAutoFraming(bool enabled);
     bool enterAutoFramingMediaMode();
     bool setAiMode(int mode, int subMode);
+    TrackingTransitionResult setTrackingState(
+        bool enabled, int aiMode, int aiSubMode,
+        const TrackingModeProfile &profile);
     bool setAutoZoom(bool enabled);
     bool setTrackSpeed(int speedMode);
     bool setAudioAutoGain(bool enabled);
@@ -147,21 +170,72 @@ signals:
     void cameraDisconnected();
     void stateChanged(const CameraState &state);
     void commandFailed(const QString &description, int errorCode);
+    void trackingIntentStarted(quint64 intentGeneration);
+    void trackingStateConfirmationPending(
+        bool trackingEnabled, quint64 intentGeneration);
+    void trackingStateConfirmationFailed(
+        bool trackingEnabled, quint64 intentGeneration);
+    void trackingStateConfirmationUncertain(quint64 intentGeneration);
+    void trackingStateConfirmed(
+        bool trackingEnabled, quint64 intentGeneration);
+    void trackingOwnershipObserved(bool trackingEnabled);
     void configLoaded();  // Emitted after config is successfully loaded
 
 private:
+    struct DeviceCallbackGate;
+    friend struct CameraControllerTestAccess;
+    std::shared_ptr<DeviceCallbackGate> m_deviceCallbackGate;
     std::shared_ptr<Device> m_device;
     bool m_connected;
+    bool m_deviceCallbackRegistered = false;
+    quint64 m_connectionGeneration = 0;
     QString m_selectedDevicePath;
+    QString m_selectedDeviceSerial;
     bool m_v4l2Only = false;
     V4l2Backend m_v4l2;
     QTimer *m_v4l2ScanTimer = nullptr;
+    quint64 m_v4l2FallbackGeneration = 0;
     QString m_v4l2DevicePath;
     CameraInfo m_cameraInfo;
     CameraState m_currentState;
     CameraState m_cachedState;  // Cache intended state during settling
     Config m_config;
     QTimer *m_settlingTimer;  // Timer for settling period after config apply
+    QTimer *m_aiConfirmationTimer;  // Fresh Tiny 2 status retries after settling
+    QTimer *m_autoFramingModeTimer;  // Owned Meet-series delayed enable step
+    bool m_autoFramingRequested = false;
+    quint64 m_autoFramingIntentGeneration = 0;
+    struct PendingAiIntent {
+        int mode;
+        int subMode;
+        int failSafeMode;
+        int failSafeSubMode;
+        quint64 intentGeneration;
+        int confirmationAttempts = 0;
+        bool failureReported = false;
+    };
+    std::optional<PendingAiIntent> m_pendingAiIntent;
+    struct PendingTrackingProfile {
+        TrackingModeProfile profile;
+        quint64 intentGeneration;
+    };
+    std::optional<PendingTrackingProfile> m_pendingTrackingProfile;
+    bool m_aiStateConfirmed = false;
+    // Granted only after this exact SDK connection has positively confirmed
+    // tracking off and restored the retained manual-focus state.
+    bool m_manualMovementAuthorized = false;
+    quint64 m_trackingIntentGeneration = 0;
+    struct PendingManualPosition {
+        double pan;
+        double tilt;
+        double zoom;
+        bool applyPanTilt;
+        bool applyZoom;
+        std::optional<int> focus;
+        quint64 trackingIntentGeneration;
+        quint64 connectionGeneration;
+    };
+    std::optional<PendingManualPosition> m_pendingManualPosition;
     ParamRange m_brightnessRange;
     ParamRange m_contrastRange;
     ParamRange m_saturationRange;
@@ -171,6 +245,11 @@ private:
     bool m_whiteBalanceFallbackActive;
     int m_fallbackWhiteBalanceMode;
     bool isTiny2Family() const;
+    bool isOriginalTinyFamily() const;
+    bool isMeetFamily() const;
+    std::shared_ptr<Device> selectedSdkDevice() const;
+    bool connectSdkDevice(const std::shared_ptr<Device> &device);
+    bool tryConnectSdkDevice();
     void tryV4l2Fallback();
     void connectV4l2(const std::string &devicePath);
     void refreshV4l2ControlRanges();
@@ -179,7 +258,11 @@ private:
     // Helper
     bool executeCommand(const QString &description, std::function<int32_t()> command);
     void updateState();
-    void saveCurrentStateToConfig();  // Update config with current camera state
+    bool applyTrackingProfile(
+        const TrackingModeProfile &profile, bool trackingEnabled);
+    bool canApplyManualMovement() const;
+    bool setFocusAbsoluteUnchecked(int position, bool autoFocus);
+    void schedulePendingManualPosition();
     void refreshControlRanges();
     void resetControlRanges();
     int clampToRange(int value, const ParamRange &range, int fallbackMin, int fallbackMax) const;

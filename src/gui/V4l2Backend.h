@@ -24,6 +24,7 @@ public:
     bool isOpen() const { return m_configured; }
     std::string devicePath() const { return m_devicePath; }
 
+    static bool isObsbotCaptureDevice(const std::string &devicePath);
     static std::string findObsbotDevice();
     std::string cardName() const;
 

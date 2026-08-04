@@ -6,7 +6,46 @@
 #include <QHBoxLayout>
 #include <QKeySequence>
 #include <QShortcut>
+#include <QTimer>
 #include <cmath>
+
+namespace {
+
+TrackingModeProfile trackingProfileFromPreset(
+    const PTZControlWidget::PresetState &preset)
+{
+    return {
+        preset.focusPolicy,
+        preset.manualFocusPosition,
+        preset.autoZoom,
+        preset.trackSpeed
+    };
+}
+
+TrackingIntentState trackingIntentFromPreset(
+    const PTZControlWidget::PresetState &preset)
+{
+    return {
+        preset.trackingEnabled,
+        preset.aiMode,
+        preset.aiSubMode,
+        trackingProfileFromPreset(preset)
+    };
+}
+
+void updatePresetTracking(PTZControlWidget::PresetState &preset,
+                          const TrackingIntentState &tracking)
+{
+    preset.trackingEnabled = tracking.enabled;
+    preset.aiMode = tracking.aiMode;
+    preset.aiSubMode = tracking.aiSubMode;
+    preset.autoZoom = tracking.profile.autoZoom;
+    preset.focusPolicy = tracking.profile.focusPolicy;
+    preset.manualFocusPosition = tracking.profile.manualFocusPosition;
+    preset.trackSpeed = tracking.profile.trackSpeed;
+}
+
+} // namespace
 
 PTZControlWidget::PTZControlWidget(CameraController *controller, QWidget *parent)
     : QWidget(parent)
@@ -29,10 +68,70 @@ PTZControlWidget::PTZControlWidget(CameraController *controller, QWidget *parent
             });
     connect(m_controller, &CameraController::cameraDisconnected, this, [this]() {
         m_cameraAvailable = false;
+        const bool recallWasPending = hasPendingRecall();
+        cancelPendingRecall();
+        if (recallWasPending) {
+            emit presetRecallFinished(false);
+        }
         for (int i = 0; i < static_cast<int>(m_presets.size()); ++i) {
             updatePresetLabel(i);
         }
     });
+    connect(m_controller, &CameraController::trackingIntentStarted,
+            this, [this](quint64 intentGeneration) {
+                if (m_pendingRecall
+                    && intentGeneration
+                        > m_pendingRecall->trackingIntentGeneration) {
+                    cancelPendingRecall();
+                    emit presetRecallFinished(false);
+                }
+            });
+    connect(m_controller, &CameraController::trackingStateConfirmed,
+            this, [this](bool trackingEnabled, quint64 intentGeneration) {
+                if (!m_pendingRecall || m_completionQueued
+                    || m_pendingRecall->trackingIntentGeneration
+                        != intentGeneration) {
+                    return;
+                }
+                if (m_pendingRecall->preset.trackingEnabled != trackingEnabled) {
+                    cancelPendingRecall();
+                    emit presetRecallFinished(false);
+                    return;
+                }
+
+                const PendingRecall pending = *m_pendingRecall;
+                m_completionQueued = true;
+                QTimer::singleShot(0, this, [this, pending]() {
+                    if (!m_pendingRecall
+                        || pending.generation != m_recallGeneration
+                        || pending.trackingIntentGeneration
+                            != m_pendingRecall->trackingIntentGeneration) {
+                        return;
+                    }
+                    const PresetState preset = m_pendingRecall->preset;
+                    m_pendingRecall.reset();
+                    m_completionQueued = false;
+                    emit presetRecallFinished(finishPresetRecall(preset));
+                });
+            });
+    connect(m_controller, &CameraController::trackingStateConfirmationFailed,
+            this, [this](bool, quint64 intentGeneration) {
+                if (m_pendingRecall
+                    && m_pendingRecall->trackingIntentGeneration
+                        == intentGeneration) {
+                    cancelPendingRecall();
+                    emit presetRecallFinished(false);
+                }
+            });
+    connect(m_controller, &CameraController::trackingStateConfirmationUncertain,
+            this, [this](quint64 intentGeneration) {
+                if (m_pendingRecall
+                    && m_pendingRecall->trackingIntentGeneration
+                        == intentGeneration) {
+                    cancelPendingRecall();
+                    emit presetRecallFinished(false);
+                }
+            });
 
     // Presets section
     QGroupBox *presetGroup = new QGroupBox("Camera Presets", this);
@@ -51,6 +150,9 @@ PTZControlWidget::PTZControlWidget(CameraController *controller, QWidget *parent
         presetUi.aiMode = 0;
         presetUi.aiSubMode = 0;
         presetUi.autoZoom = false;
+        presetUi.focusPolicy = TrackingFocusPolicy::Manual;
+        presetUi.manualFocusPosition = 50;
+        presetUi.trackSpeed = Device::AiTrackSpeedStandard;
         presetUi.paperCrop = {};
 
         QHBoxLayout *row = new QHBoxLayout();
@@ -145,6 +247,9 @@ void PTZControlWidget::applyPresetStates(const std::array<PresetState, 3> &prese
         ui.aiMode = preset.aiMode;
         ui.aiSubMode = preset.aiSubMode;
         ui.autoZoom = preset.autoZoom;
+        ui.focusPolicy = preset.focusPolicy;
+        ui.manualFocusPosition = preset.manualFocusPosition;
+        ui.trackSpeed = preset.trackSpeed;
         ui.paperCrop = preset.paperCrop;
         updatePresetLabel(i);
     }
@@ -165,6 +270,9 @@ std::array<PTZControlWidget::PresetState, 3> PTZControlWidget::currentPresets() 
             ui.aiMode,
             ui.aiSubMode,
             ui.autoZoom,
+            ui.focusPolicy,
+            ui.manualFocusPosition,
+            ui.trackSpeed,
             ui.paperCrop
         };
     }
@@ -178,11 +286,22 @@ bool PTZControlWidget::canRecallPreset(int index) const
     }
 
     const auto &preset = m_presets[static_cast<size_t>(index)];
+    const TrackingModeProfile profile{
+        preset.focusPolicy,
+        preset.manualFocusPosition,
+        preset.autoZoom,
+        preset.trackSpeed
+    };
     return preset.defined
         && std::isfinite(preset.pan) && preset.pan >= -1.0 && preset.pan <= 1.0
         && std::isfinite(preset.tilt) && preset.tilt >= -1.0 && preset.tilt <= 1.0
         && std::isfinite(preset.zoom) && preset.zoom >= 1.0 && preset.zoom <= 2.0
-        && (!preset.sceneDefined || preset.paperCrop.isValid());
+        && (!preset.sceneDefined
+            || (preset.paperCrop.isValid()
+                && isValidTrackingModeProfile(profile)
+                && (preset.trackingEnabled
+                    || (preset.focusPolicy == TrackingFocusPolicy::Manual
+                        && !preset.autoZoom))));
 }
 
 bool PTZControlWidget::recallPreset(int index)
@@ -191,35 +310,107 @@ bool PTZControlWidget::recallPreset(int index)
         return false;
     }
 
-    const auto &preset = m_presets[static_cast<size_t>(index)];
-
-    if (preset.sceneDefined && m_effectsWidget) {
-        auto effects = m_effectsWidget->settings();
-        effects.paperCrop = preset.paperCrop;
-        m_effectsWidget->applySettings(effects);
+    const auto &ui = m_presets[static_cast<size_t>(index)];
+    PresetState preset = {
+        ui.defined,
+        ui.pan,
+        ui.tilt,
+        ui.zoom,
+        ui.sceneDefined,
+        ui.trackingEnabled,
+        ui.aiMode,
+        ui.aiSubMode,
+        ui.autoZoom,
+        ui.focusPolicy,
+        ui.manualFocusPosition,
+        ui.trackSpeed,
+        ui.paperCrop
+    };
+    if (hasPendingRecall()) {
+        cancelPendingRecall();
+        emit presetRecallFinished(false);
     }
+    const quint64 recallGeneration = ++m_recallGeneration;
 
-    bool trackingApplied = true;
+    TrackingControlWidget::TrackingApplyResult trackingResult{true, false, 0};
     if (preset.sceneDefined && m_trackingWidget) {
-        trackingApplied = m_trackingWidget->applyTrackingState({
-            preset.trackingEnabled,
-            preset.aiMode,
-            preset.aiSubMode,
-            preset.autoZoom
-        });
+        TrackingIntentState tracking = trackingIntentFromPreset(preset);
+        tracking = applyAutomaticPaperCropTrackingPolicy(
+            static_cast<int>(preset.paperCrop.mode),
+            m_trackingWidget->hasTiny2Capabilities(),
+            tracking,
+            m_trackingWidget->modeProfiles());
+        updatePresetTracking(preset, tracking);
+        trackingResult = m_trackingWidget->applyTrackingState(tracking);
     } else if (!preset.sceneDefined && m_trackingWidget) {
         auto tracking = m_trackingWidget->trackingState();
         tracking.enabled = false;
-        trackingApplied = m_trackingWidget->applyTrackingState(tracking);
+        tracking.profile.focusPolicy = TrackingFocusPolicy::Manual;
+        tracking.profile.autoZoom = false;
+        updatePresetTracking(preset, tracking);
+        trackingResult = m_trackingWidget->applyTrackingState(tracking);
     }
 
-    if (preset.sceneDefined && preset.trackingEnabled) {
-        return trackingApplied;
+    if (!trackingResult.accepted) {
+        return false;
+    }
+    if (trackingResult.confirmationPending) {
+        // Never send PTZ/zoom while AI ownership is unconfirmed. Continue the
+        // accepted recall only after CameraController reports a fresh match.
+        m_pendingRecall = PendingRecall{
+            preset, recallGeneration, trackingResult.intentGeneration};
+        return true;
+    }
+    return finishPresetRecall(preset);
+}
+
+void PTZControlWidget::cancelPendingRecall()
+{
+    // Always invalidate a zero-delay continuation, even after confirmation has
+    // moved it out of the transport-pending phase.
+    ++m_recallGeneration;
+    m_pendingRecall.reset();
+    m_completionQueued = false;
+}
+
+bool PTZControlWidget::finishPresetRecall(const PresetState &preset)
+{
+    if (!m_cameraAvailable) {
+        return false;
     }
 
-    const bool panTiltApplied = m_controller->setPanTilt(preset.pan, preset.tilt);
-    const bool zoomApplied = m_controller->setZoom(preset.zoom);
-    return trackingApplied && panTiltApplied && zoomApplied;
+    if (m_trackingWidget) {
+        if (preset.sceneDefined) {
+            const TrackingControlWidget::TrackingState expected =
+                trackingIntentFromPreset(preset);
+            if (!m_trackingWidget->matchesTrackingState(expected)) {
+                return false;
+            }
+        } else if (!m_trackingWidget->isManualControlEnabled()) {
+            return false;
+        }
+    }
+
+    const bool positionApplied =
+        !(preset.sceneDefined && preset.trackingEnabled);
+    if (positionApplied) {
+        if (!m_controller->setPanTilt(preset.pan, preset.tilt)) {
+            return false;
+        }
+        if (!m_controller->setZoom(preset.zoom)) {
+            return false;
+        }
+    }
+
+    // Crop is local and infallible, so apply it last. A failed tracking/PTZ
+    // transition therefore cannot persist a partial crop-only scene recall.
+    if (preset.sceneDefined && m_effectsWidget) {
+        m_effectsWidget->applyPaperCropForScene(preset.paperCrop);
+    }
+    emit sceneIntentApplied(
+        trackingIntentFromPreset(preset), positionApplied,
+        preset.pan, preset.tilt, preset.zoom, preset.paperCrop);
+    return true;
 }
 
 void PTZControlWidget::onRecallPreset()
@@ -257,7 +448,10 @@ void PTZControlWidget::onStorePreset()
         preset.trackingEnabled = tracking.enabled;
         preset.aiMode = tracking.aiMode;
         preset.aiSubMode = tracking.aiSubMode;
-        preset.autoZoom = tracking.autoZoom;
+        preset.autoZoom = tracking.profile.autoZoom;
+        preset.focusPolicy = tracking.profile.focusPolicy;
+        preset.manualFocusPosition = tracking.profile.manualFocusPosition;
+        preset.trackSpeed = tracking.profile.trackSpeed;
     }
     if (m_effectsWidget) {
         preset.paperCrop = m_effectsWidget->settings().paperCrop;

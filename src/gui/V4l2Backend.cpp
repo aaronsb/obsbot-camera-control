@@ -16,6 +16,8 @@ V4l2Backend::~V4l2Backend()
 bool V4l2Backend::open(const std::string &devicePath)
 {
     close();
+    if (!isObsbotCaptureDevice(devicePath))
+        return false;
     int fd = ::open(devicePath.c_str(), O_RDWR | O_NONBLOCK);
     if (fd < 0)
         return false;
@@ -38,6 +40,29 @@ int V4l2Backend::openDevice() const
     return ::open(m_devicePath.c_str(), O_RDWR | O_NONBLOCK);
 }
 
+bool V4l2Backend::isObsbotCaptureDevice(const std::string &devicePath)
+{
+    int fd = ::open(devicePath.c_str(), O_RDWR | O_NONBLOCK);
+    if (fd < 0)
+        return false;
+
+    struct v4l2_capability cap{};
+    const bool queried = ioctl(fd, VIDIOC_QUERYCAP, &cap) == 0;
+    ::close(fd);
+    if (!queried)
+        return false;
+
+    const std::string card(reinterpret_cast<const char *>(cap.card));
+    const uint32_t capabilities = (cap.capabilities & V4L2_CAP_DEVICE_CAPS)
+        ? cap.device_caps : cap.capabilities;
+    const bool isVideoCapture =
+        (capabilities & (V4L2_CAP_VIDEO_CAPTURE
+                         | V4L2_CAP_VIDEO_CAPTURE_MPLANE)) != 0;
+    return isVideoCapture
+        && card.find("OBSBOT") != std::string::npos
+        && card.find("Virtual Camera") == std::string::npos;
+}
+
 std::string V4l2Backend::findObsbotDevice()
 {
     DIR *dir = opendir("/dev");
@@ -46,26 +71,15 @@ std::string V4l2Backend::findObsbotDevice()
 
     struct dirent *entry;
     while ((entry = readdir(dir)) != nullptr) {
-        std::string name = entry->d_name;
+        const std::string name = entry->d_name;
         if (name.find("video") != 0)
             continue;
 
-        std::string path = "/dev/" + name;
-        int fd = ::open(path.c_str(), O_RDWR | O_NONBLOCK);
-        if (fd < 0)
-            continue;
-
-        struct v4l2_capability cap{};
-        if (ioctl(fd, VIDIOC_QUERYCAP, &cap) == 0) {
-            std::string card(reinterpret_cast<const char *>(cap.card));
-            bool isVideoCapture = (cap.device_caps & V4L2_CAP_VIDEO_CAPTURE) != 0;
-            if (card.find("OBSBOT") != std::string::npos && isVideoCapture) {
-                ::close(fd);
-                closedir(dir);
-                return path;
-            }
+        const std::string path = "/dev/" + name;
+        if (isObsbotCaptureDevice(path)) {
+            closedir(dir);
+            return path;
         }
-        ::close(fd);
     }
     closedir(dir);
     return {};

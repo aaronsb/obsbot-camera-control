@@ -5,6 +5,7 @@
 #include <map>
 #include <vector>
 #include <array>
+#include "TrackingModeProfile.h"
 
 /**
  * @brief Configuration manager for OBSBOT camera settings
@@ -41,6 +42,9 @@ public:
             int aiMode;
             int aiSubMode;
             bool autoZoom;
+            TrackingFocusPolicy focusPolicy;
+            int manualFocusPosition;
+            int trackSpeed;
             int paperCropMode;
             double paperCropLeft;
             double paperCropTop;
@@ -56,12 +60,22 @@ public:
         double zoom;          // 1.0 - 2.0
         double pan;           // -1.0 to 1.0
         double tilt;          // -1.0 to 1.0
+        // Camera-bound intent categories. A camera switch clears categories
+        // whose state cannot be read safely, preventing prior-camera values
+        // from being applied on reconnect.
+        bool panTiltIntentDefined;
+        bool zoomIntentDefined;
+        bool imageIntentDefined;
 
         // AI / Tracking
         int aiMode;           // Device::AiWorkModeType
         int aiSubMode;        // Device::AiSubModeType
         bool autoZoom;        // Enable adaptive auto zoom
         int trackSpeed;       // Device::AiTrackSpeedType
+        // Exact current Tiny 2 intent plus independent defaults for
+        // Group, Human, Hand, Whiteboard, and Desk.
+        TrackingModeProfile activeTrackingProfile;
+        Tiny2TrackingModeProfiles trackingModeProfiles;
 
         // Image controls
         bool brightnessAuto;  // Auto mode for brightness
@@ -155,6 +169,8 @@ private:
     void setDefaults();
     bool parseLine(const std::string &line, int lineNumber, std::vector<ValidationError> &errors);
     bool validateSettings(std::vector<ValidationError> &errors);
+    void migrateTrackingProfiles(
+        const std::map<std::string, std::string> &parsedValues);
     std::string getXdgConfigHome() const;
 };
 

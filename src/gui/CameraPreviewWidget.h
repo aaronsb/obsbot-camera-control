@@ -40,6 +40,7 @@ public:
     void setControlsVisible(bool visible);
     void setVirtualCameraStreamer(VirtualCameraStreamer *streamer);
     void setVideoEffects(const FilterPreviewWidget::VideoEffectsSettings &settings);
+    void resetPaperDetection();
     FilterPreviewWidget::VideoEffectsSettings videoEffects() const;
     void captureSnapshot();
 
@@ -50,6 +51,7 @@ signals:
     void previewFailed(const QString &error);  // Emitted when preview fails to start
     void preferredFormatChanged(const QString &formatId);
     void snapshotCaptured(const QImage &image);
+    void paperDetectionChanged(bool detected);
 
 private slots:
     void onCameraError(QCamera::Error error);

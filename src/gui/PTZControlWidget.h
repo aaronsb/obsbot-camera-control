@@ -9,11 +9,13 @@
 #include <QLabel>
 #include <QGroupBox>
 #include <array>
+#include <optional>
 #include "CameraController.h"
 
 class CameraSettingsWidget;
 class TrackingControlWidget;
 class VideoEffectsWidget;
+struct PTZControlWidgetTestAccess;
 
 /**
  * @brief Widget for camera preset management
@@ -46,12 +48,19 @@ public:
         int aiMode;
         int aiSubMode;
         bool autoZoom;
+        TrackingFocusPolicy focusPolicy;
+        int manualFocusPosition;
+        int trackSpeed;
         PaperCropSettings paperCrop;
     };
     void applyPresetStates(const std::array<PresetState, 3> &presets);
     std::array<PresetState, 3> currentPresets() const;
     bool canRecallPreset(int index) const;
     bool recallPreset(int index);
+    bool hasPendingRecall() const {
+        return m_pendingRecall.has_value() || m_completionQueued;
+    }
+    void cancelPendingRecall();
 
     struct ImagePresetState {
         bool defined;
@@ -74,6 +83,11 @@ public:
 signals:
     void presetUpdated(int index);
     void imagePresetUpdated(int index);
+    void presetRecallFinished(bool success);
+    void sceneIntentApplied(
+        const TrackingIntentState &tracking,
+        bool positionApplied, double pan, double tilt, double zoom,
+        const PaperCropSettings &paperCrop);
 
 private slots:
     void onRecallPreset();
@@ -83,6 +97,7 @@ private slots:
 
 private:
     CameraController *m_controller;
+    friend struct PTZControlWidgetTestAccess;
     CameraSettingsWidget *m_settingsWidget;
     TrackingControlWidget *m_trackingWidget;
     VideoEffectsWidget *m_effectsWidget;
@@ -101,6 +116,9 @@ private:
         int aiMode;
         int aiSubMode;
         bool autoZoom;
+        TrackingFocusPolicy focusPolicy;
+        int manualFocusPosition;
+        int trackSpeed;
         PaperCropSettings paperCrop;
     };
 
@@ -113,8 +131,17 @@ private:
 
     std::array<PresetUi, 3> m_presets;
     std::array<ImagePresetUi, 3> m_imagePresets;
+    struct PendingRecall {
+        PresetState preset;
+        quint64 generation;
+        quint64 trackingIntentGeneration;
+    };
+    std::optional<PendingRecall> m_pendingRecall;
+    quint64 m_recallGeneration = 0;
+    bool m_completionQueued = false;
 
     void updatePresetLabel(int index);
+    bool finishPresetRecall(const PresetState &preset);
     void updateImagePresetLabel(int index);
 };
 

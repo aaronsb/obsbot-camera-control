@@ -12,9 +12,73 @@
 
 using namespace std;
 
+namespace {
+
+int32_t applyTrackingCommand(const shared_ptr<Device> &dev, bool enabled,
+                             int aiMode, int aiSubMode, bool autoZoom)
+{
+    const auto product = dev->productType();
+    const bool tiny2Family = product == ObsbotProdTiny2
+        || product == ObsbotProdTiny2Lite || product == ObsbotProdTinySE;
+    if (tiny2Family) {
+        int mode = enabled ? aiMode : Device::AiWorkModeNone;
+        if (enabled && mode == Device::AiWorkModeNone) {
+            mode = Device::AiWorkModeHuman;
+        }
+        const int subMode = mode == Device::AiWorkModeHuman ? aiSubMode : 0;
+        const int32_t zoomResult = dev->aiSetAiAutoZoomR(enabled && autoZoom);
+        const int32_t modeResult = dev->cameraSetAiModeU(
+            static_cast<Device::AiWorkModeType>(mode), subMode);
+        if (modeResult != 0) {
+            return modeResult;
+        }
+        if (zoomResult != 0) {
+            return zoomResult;
+        }
+
+        constexpr int confirmationAttempts = 20;
+        for (int attempt = 0; attempt < confirmationAttempts; ++attempt) {
+            Device::CameraStatus status{};
+            if (dev->cameraGetCameraStatusU(status) == 0
+                && status.tiny.ai_mode == mode
+                && (mode != Device::AiWorkModeHuman
+                    || status.tiny.ai_sub_mode == subMode)) {
+                return 0;
+            }
+            if (attempt + 1 < confirmationAttempts) {
+                this_thread::sleep_for(chrono::milliseconds(200));
+            }
+        }
+        return -1;
+    }
+
+    if (product == ObsbotProdTiny || product == ObsbotProdTiny4k) {
+        return dev->aiSetTargetSelectR(enabled);
+    }
+
+    const bool meetFamily = product == ObsbotProdMeet || product == ObsbotProdMeet4k
+        || product == ObsbotProdMeet2 || product == ObsbotProdMeetSE;
+    if (!meetFamily) {
+        return -1;
+    }
+    if (!enabled) {
+        return dev->cameraSetMediaModeU(Device::MediaModeNormal);
+    }
+
+    const int32_t mediaResult = dev->cameraSetMediaModeU(Device::MediaModeAutoFrame);
+    if (mediaResult != 0) {
+        return mediaResult;
+    }
+    this_thread::sleep_for(chrono::milliseconds(500));
+    return dev->cameraSetAutoFramingModeU(
+        Device::AutoFrmSingle, Device::AutoFrmUpperBody);
+}
+
+} // namespace
+
 // Forward declarations
 bool handleConfigErrors(Config &config);
-void applyConfigToCamera(shared_ptr<Device> dev, const Config::CameraSettings &settings);
+bool applyConfigToCamera(shared_ptr<Device> dev, const Config::CameraSettings &settings);
 void runInteractiveMode(shared_ptr<Device> dev);
 
 int main(int argc, char **argv)
@@ -109,7 +173,9 @@ int main(int argc, char **argv)
     }
 
     if (action == CliAction::RecallPreset) {
-        if (!applyPresetToCamera(dev, *requestedPreset, cout, cerr)) {
+        if (!applyPresetToCamera(
+                dev, *requestedPreset,
+                settings.trackingModeProfiles, cout, cerr)) {
             return 1;
         }
         cout << "Scene preset " << parsed.options.presetNumber << " recalled." << endl;
@@ -117,7 +183,10 @@ int main(int argc, char **argv)
         runInteractiveMode(dev);
     } else {
         cout << "\nApplying configuration to camera..." << endl;
-        applyConfigToCamera(dev, settings);
+        if (!applyConfigToCamera(dev, settings)) {
+            cerr << "Configuration was only partially applied." << endl;
+            return 1;
+        }
         cout << "Configuration applied successfully." << endl;
         cout << "Camera settings have been updated." << endl;
     }
@@ -178,102 +247,71 @@ bool handleConfigErrors(Config &config)
     }
 }
 
-void applyConfigToCamera(shared_ptr<Device> dev, const Config::CameraSettings &settings)
+bool applyConfigToCamera(shared_ptr<Device> dev, const Config::CameraSettings &settings)
 {
-    int32_t ret;
-
-    // Apply face tracking
-    if (settings.faceTracking) {
-        cout << "  Enabling face tracking..." << endl;
-        ret = dev->cameraSetMediaModeU(Device::MediaModeAutoFrame);
-        if (ret != 0) {
-            cout << "    Failed to set MediaMode (code: " << ret << ")" << endl;
-        } else {
-            this_thread::sleep_for(chrono::milliseconds(500));
-            ret = dev->cameraSetAutoFramingModeU(Device::AutoFrmSingle, Device::AutoFrmUpperBody);
-            if (ret != 0) {
-                cout << "    Failed to set AutoFraming mode (code: " << ret << ")" << endl;
-            }
+    bool success = true;
+    auto recordFailure = [&success](int32_t result) {
+        if (result != 0) {
+            cout << "    Failed (code: " << result << ")" << endl;
+            success = false;
         }
-    } else {
-        cout << "  Disabling face tracking..." << endl;
-        ret = dev->cameraSetMediaModeU(Device::MediaModeNormal);
-        if (ret != 0) {
-            cout << "    Failed to set MediaMode (code: " << ret << ")" << endl;
-        }
-    }
+    };
 
-    // Apply HDR
+    // Apply face tracking with the protocol for this camera family.
+    cout << "  " << (settings.faceTracking ? "Enabling" : "Disabling")
+         << " face tracking..." << endl;
+    const int32_t trackingResult = applyTrackingCommand(
+        dev, settings.faceTracking, settings.aiMode,
+        settings.aiSubMode, settings.autoZoom);
+    recordFailure(trackingResult);
+    const bool manualPositioningAllowed =
+        !settings.faceTracking && trackingResult == 0;
+
     cout << "  Setting HDR: " << (settings.hdr ? "On" : "Off") << endl;
-    ret = dev->cameraSetWdrR(settings.hdr ? Device::DevWdrModeDol2TO1 : Device::DevWdrModeNone);
-    if (ret != 0) {
-        cout << "    Failed (code: " << ret << ")" << endl;
-    }
+    recordFailure(dev->cameraSetWdrR(
+        settings.hdr ? Device::DevWdrModeDol2TO1 : Device::DevWdrModeNone));
 
-    // Apply FOV
     const char* fovNames[] = {"Wide (86°)", "Medium (78°)", "Narrow (65°)"};
     cout << "  Setting FOV: " << fovNames[settings.fov] << endl;
-    Device::FovType fovType = settings.fov == 0 ? Device::FovType86 :
-                               (settings.fov == 1 ? Device::FovType78 : Device::FovType65);
-    ret = dev->cameraSetFovU(fovType);
-    if (ret != 0) {
-        cout << "    Failed (code: " << ret << ")" << endl;
-    }
+    const Device::FovType fovType = settings.fov == 0 ? Device::FovType86 :
+        (settings.fov == 1 ? Device::FovType78 : Device::FovType65);
+    recordFailure(dev->cameraSetFovU(fovType));
 
-    // Apply Face AE
     cout << "  Setting Face AE: " << (settings.faceAE ? "On" : "Off") << endl;
-    ret = dev->cameraSetFaceAER(settings.faceAE);
-    if (ret != 0) {
-        cout << "    Failed (code: " << ret << ")" << endl;
-    }
+    recordFailure(dev->cameraSetFaceAER(settings.faceAE));
 
-    // Apply Face Focus
     cout << "  Setting Face Focus: " << (settings.faceFocus ? "On" : "Off") << endl;
-    ret = dev->cameraSetFaceFocusR(settings.faceFocus);
-    if (ret != 0) {
-        cout << "    Failed (code: " << ret << ")" << endl;
+    recordFailure(dev->cameraSetFaceFocusR(settings.faceFocus));
+
+    if (manualPositioningAllowed) {
+        cout << "  Setting Zoom: " << settings.zoom << "x" << endl;
+        recordFailure(dev->cameraSetZoomAbsoluteR(settings.zoom));
+
+        cout << "  Setting Pan/Tilt: " << settings.pan << ", " << settings.tilt << endl;
+        recordFailure(dev->cameraSetPanTiltAbsolute(settings.pan, settings.tilt));
+    } else {
+        cout << "  Skipping manual zoom and pan/tilt because tracking is enabled"
+             << " or could not be disabled." << endl;
     }
 
-    // Apply Zoom
-    cout << "  Setting Zoom: " << settings.zoom << "x" << endl;
-    ret = dev->cameraSetZoomAbsoluteR(settings.zoom);
-    if (ret != 0) {
-        cout << "    Failed (code: " << ret << ")" << endl;
-    }
-
-    // Apply Pan/Tilt
-    cout << "  Setting Pan/Tilt: " << settings.pan << ", " << settings.tilt << endl;
-    ret = dev->cameraSetPanTiltAbsolute(settings.pan, settings.tilt);
-    if (ret != 0) {
-        cout << "    Failed (code: " << ret << ")" << endl;
-    }
-
-    // Apply Image Controls
     cout << "  Setting Brightness: " << settings.brightness << endl;
-    ret = dev->cameraSetImageBrightnessR(settings.brightness);
-    if (ret != 0) {
-        cout << "    Failed (code: " << ret << ")" << endl;
-    }
+    recordFailure(dev->cameraSetImageBrightnessR(settings.brightness));
 
     cout << "  Setting Contrast: " << settings.contrast << endl;
-    ret = dev->cameraSetImageContrastR(settings.contrast);
-    if (ret != 0) {
-        cout << "    Failed (code: " << ret << ")" << endl;
-    }
+    recordFailure(dev->cameraSetImageContrastR(settings.contrast));
 
     cout << "  Setting Saturation: " << settings.saturation << endl;
-    ret = dev->cameraSetImageSaturationR(settings.saturation);
-    if (ret != 0) {
-        cout << "    Failed (code: " << ret << ")" << endl;
-    }
+    recordFailure(dev->cameraSetImageSaturationR(settings.saturation));
 
     const char* wbNames[] = {"Auto", "Daylight", "Fluorescent", "Tungsten", "Flash", "Fine", "Cloudy", "Shade"};
-    cout << "  Setting White Balance: " << wbNames[settings.whiteBalance] << endl;
-    Device::DevWhiteBalanceType wbType = static_cast<Device::DevWhiteBalanceType>(settings.whiteBalance);
-    ret = dev->cameraSetWhiteBalanceR(wbType, 0);
-    if (ret != 0) {
-        cout << "    Failed (code: " << ret << ")" << endl;
+    if (settings.whiteBalance >= 0 && settings.whiteBalance < 8) {
+        cout << "  Setting White Balance: " << wbNames[settings.whiteBalance] << endl;
+    } else {
+        cout << "  Setting White Balance mode: " << settings.whiteBalance << endl;
     }
+    const auto wbType = static_cast<Device::DevWhiteBalanceType>(settings.whiteBalance);
+    recordFailure(dev->cameraSetWhiteBalanceR(wbType, 0));
+    return success;
 }
 
 void runInteractiveMode(shared_ptr<Device> dev)
@@ -312,6 +350,17 @@ void runInteractiveMode(shared_ptr<Device> dev)
     const double ptz_step = 0.1;
     const double zoom_step = 0.1;
     const int focus_step = 5;  // 5% increments
+    // Start fail-closed: only a successful tracking-off command authorizes
+    // manual PTZ/zoom/focus commands in this raw SDK tool.
+    bool manualPositioningAllowed = false;
+    auto requireManualPositioning = [&manualPositioningAllowed]() {
+        if (manualPositioningAllowed) {
+            return true;
+        }
+        cout << "Refusing manual command until tracking is successfully disabled."
+             << endl;
+        return false;
+    };
 
     string cmd;
     cout << "\nEnter command: ";
@@ -325,23 +374,23 @@ void runInteractiveMode(shared_ptr<Device> dev)
         switch (choice) {
             case 1:
                 cout << "Enabling face tracking..." << endl;
-                ret = dev->cameraSetMediaModeU(Device::MediaModeAutoFrame);
-                if (ret == 0) {
-                    this_thread::sleep_for(chrono::milliseconds(500));
-                    ret = dev->cameraSetAutoFramingModeU(Device::AutoFrmSingle, Device::AutoFrmUpperBody);
-                    cout << (ret == 0 ? "Success" : "Failed") << endl;
-                } else {
-                    cout << "Failed (code: " << ret << ")" << endl;
-                }
+                ret = applyTrackingCommand(
+                    dev, true, Device::AiWorkModeHuman,
+                    Device::AiSubModeUpperBody, false);
+                manualPositioningAllowed = false;
+                cout << (ret == 0 ? "Success" : "Failed") << endl;
                 break;
 
             case 2:
                 cout << "Disabling face tracking..." << endl;
-                ret = dev->cameraSetMediaModeU(Device::MediaModeNormal);
+                ret = applyTrackingCommand(
+                    dev, false, Device::AiWorkModeNone, 0, false);
+                manualPositioningAllowed = ret == 0;
                 cout << (ret == 0 ? "Success" : "Failed") << endl;
                 break;
 
             case 3:
+                if (!requireManualPositioning()) break;
                 current_zoom += zoom_step;
                 if (current_zoom > 2.0) current_zoom = 2.0;
                 cout << "Zooming in (" << current_zoom << "x)..." << endl;
@@ -350,6 +399,7 @@ void runInteractiveMode(shared_ptr<Device> dev)
                 break;
 
             case 4:
+                if (!requireManualPositioning()) break;
                 current_zoom -= zoom_step;
                 if (current_zoom < 1.0) current_zoom = 1.0;
                 cout << "Zooming out (" << current_zoom << "x)..." << endl;
@@ -358,6 +408,7 @@ void runInteractiveMode(shared_ptr<Device> dev)
                 break;
 
             case 5:
+                if (!requireManualPositioning()) break;
                 current_pan -= ptz_step;
                 if (current_pan < -1.0) current_pan = -1.0;
                 cout << "Panning left..." << endl;
@@ -366,6 +417,7 @@ void runInteractiveMode(shared_ptr<Device> dev)
                 break;
 
             case 6:
+                if (!requireManualPositioning()) break;
                 current_pan += ptz_step;
                 if (current_pan > 1.0) current_pan = 1.0;
                 cout << "Panning right..." << endl;
@@ -374,6 +426,7 @@ void runInteractiveMode(shared_ptr<Device> dev)
                 break;
 
             case 7:
+                if (!requireManualPositioning()) break;
                 current_tilt += ptz_step;
                 if (current_tilt > 1.0) current_tilt = 1.0;
                 cout << "Tilting up..." << endl;
@@ -382,6 +435,7 @@ void runInteractiveMode(shared_ptr<Device> dev)
                 break;
 
             case 8:
+                if (!requireManualPositioning()) break;
                 current_tilt -= ptz_step;
                 if (current_tilt < -1.0) current_tilt = -1.0;
                 cout << "Tilting down..." << endl;
@@ -390,6 +444,7 @@ void runInteractiveMode(shared_ptr<Device> dev)
                 break;
 
             case 9:
+                if (!requireManualPositioning()) break;
                 current_pan = 0.0;
                 current_tilt = 0.0;
                 cout << "Centering view..." << endl;
@@ -409,6 +464,7 @@ void runInteractiveMode(shared_ptr<Device> dev)
             }
 
             case 'a': {
+                if (!requireManualPositioning()) break;
                 cout << "Enabling auto focus..." << endl;
                 int32_t ret = dev->cameraSetFocusAbsolute(0, true);
                 cout << (ret == 0 ? "Success" : "Failed") << endl;
@@ -416,6 +472,7 @@ void runInteractiveMode(shared_ptr<Device> dev)
             }
 
             case 'm': {
+                if (!requireManualPositioning()) break;
                 cout << "Enter focus value (0-100): ";
                 int focus_val;
                 cin >> focus_val;
@@ -429,6 +486,7 @@ void runInteractiveMode(shared_ptr<Device> dev)
             }
 
             case 'k': {
+                if (!requireManualPositioning()) break;
                 current_focus += focus_step;
                 if (current_focus > 100) current_focus = 100;
                 cout << "Increasing focus to " << current_focus << "..." << endl;
@@ -438,6 +496,7 @@ void runInteractiveMode(shared_ptr<Device> dev)
             }
 
             case 'j': {
+                if (!requireManualPositioning()) break;
                 current_focus -= focus_step;
                 if (current_focus < 0) current_focus = 0;
                 cout << "Decreasing focus to " << current_focus << "..." << endl;
@@ -473,7 +532,12 @@ void runInteractiveMode(shared_ptr<Device> dev)
                 cin >> ai_mode;
                 if (ai_mode >= 0 && ai_mode <= 5) {
                     cout << "Setting AI mode to " << ai_mode << "..." << endl;
-                    int32_t ret = dev->cameraSetAiModeU(static_cast<Device::AiWorkModeType>(ai_mode));
+                    const bool enableAi = ai_mode != Device::AiWorkModeNone;
+                    const int subMode = ai_mode == Device::AiWorkModeHuman
+                        ? Device::AiSubModeUpperBody : 0;
+                    const int32_t ret = applyTrackingCommand(
+                        dev, enableAi, ai_mode, subMode, false);
+                    manualPositioningAllowed = ret == 0 && !enableAi;
                     cout << (ret == 0 ? "Success" : "Failed") << endl;
                 } else {
                     cout << "Invalid AI mode (0-5)" << endl;
@@ -483,7 +547,9 @@ void runInteractiveMode(shared_ptr<Device> dev)
 
             case 'I': {
                 cout << "Disabling AI Mode..." << endl;
-                int32_t ret = dev->cameraSetAiModeU(Device::AiWorkModeNone);
+                const int32_t ret = applyTrackingCommand(
+                    dev, false, Device::AiWorkModeNone, 0, false);
+                manualPositioningAllowed = ret == 0;
                 cout << (ret == 0 ? "Success" : "Failed") << endl;
                 break;
             }

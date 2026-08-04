@@ -111,6 +111,16 @@ public:
         updateWhiteBalanceKelvinLabel(clamped);
     }
 
+signals:
+    void hdrIntentEdited(bool enabled);
+    void fovIntentEdited(int mode);
+    void faceAEIntentEdited(bool enabled);
+    void faceFocusIntentEdited(bool enabled);
+    void brightnessIntentEdited(bool automatic, int value);
+    void contrastIntentEdited(bool automatic, int value);
+    void saturationIntentEdited(bool automatic, int value);
+    void whiteBalanceIntentEdited(int mode, int kelvin);
+
 private slots:
     void onHDRToggled(bool checked);
     void onFOVChanged(int index);

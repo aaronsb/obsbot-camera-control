@@ -9,6 +9,7 @@
 #include <QVBoxLayout>
 #include <QSystemTrayIcon>
 #include <QMenu>
+#include <functional>
 #include "CameraController.h"
 #include "TrackingControlWidget.h"
 #include "PTZControlWidget.h"
@@ -69,6 +70,7 @@ private slots:
     void onVirtualCameraResolutionChanged(int index);
     void onVirtualCameraError(const QString &message);
     void onVideoEffectsChanged(const FilterPreviewWidget::VideoEffectsSettings &settings);
+    void onPaperCropIntentEdited(const PaperCropSettings &settings);
     void onSnapshotCaptured(const QImage &image);
     void onSnapshotDirectoryEdited();
 
@@ -89,6 +91,15 @@ private:
     void updateVirtualCameraAvailability(const QString &devicePath);
     void updateVirtualCameraStreamerState();
     void fitTabToCurrentPage();
+    void updatePersistedIntent(
+        const std::function<void(Config::CameraSettings &)> &update);
+    TrackingIntentState trackingIntentFromSettings(
+        const Config::CameraSettings &settings) const;
+    void storeTrackingIntent(
+        Config::CameraSettings &settings,
+        const TrackingIntentState &tracking,
+        bool updateModeProfile) const;
+    bool enforceAutomaticPaperCropTrackingPolicy();
 
     // Controller
     CameraController *m_controller;
@@ -96,10 +107,16 @@ private:
     // Camera selector (shown only when >1 OBSBOT camera is detected)
     QComboBox *m_cameraSelectorCombo {nullptr};
     QLabel *m_cameraSelectorLabel {nullptr};
-    struct DetectedCamera { QString label; QString devicePath; QString serial; };
+    struct DetectedCamera {
+        QString label;
+        QString devicePath;
+        QString serial;
+        bool available {true};
+    };
     QList<DetectedCamera> m_detectedCameras;
     void populateCameraSelector();
     bool m_isCameraSwitch {false};
+    quint64 m_cameraSwitchGeneration {0};
 
     // UI
     QPushButton *m_previewToggleButton;
@@ -156,6 +173,8 @@ private:
     bool m_isApplyingStyle;
     bool m_virtualCameraErrorNotified;
     bool m_virtualCameraAvailable;
+    bool m_initialCameraStateApplied {false};
+    bool m_remoteRecallInProgress {false};
     bool m_dbusRegistered {false};
     int m_pendingRemotePreset {-1};
 

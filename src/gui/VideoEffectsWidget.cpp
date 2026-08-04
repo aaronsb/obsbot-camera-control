@@ -52,6 +52,7 @@ VideoEffectsWidget::VideoEffectsWidget(QWidget *parent)
     , m_cropModeCombo(nullptr)
     , m_cropMarginsContainer(nullptr)
     , m_cropStatusLabel(nullptr)
+    , m_paperDetected(false)
     , m_cropLeftSlider(nullptr)
     , m_cropTopSlider(nullptr)
     , m_cropRightSlider(nullptr)
@@ -86,6 +87,7 @@ VideoEffectsWidget::VideoEffectsWidget(QWidget *parent)
     modeLayout->setContentsMargins(0, 0, 0, 0);
     modeLayout->addWidget(new QLabel(tr("Mode"), modeRow));
     m_cropModeCombo = new QComboBox(modeRow);
+    m_cropModeCombo->setObjectName(QStringLiteral("paperCropModeCombo"));
     m_cropModeCombo->addItem(tr("Off"), static_cast<int>(PaperCropMode::Off));
     m_cropModeCombo->addItem(tr("Manual rectangle"), static_cast<int>(PaperCropMode::Manual));
     m_cropModeCombo->addItem(tr("Automatic paper detection"), static_cast<int>(PaperCropMode::Automatic));
@@ -93,6 +95,7 @@ VideoEffectsWidget::VideoEffectsWidget(QWidget *parent)
     cropLayout->addWidget(modeRow);
 
     m_cropStatusLabel = new QLabel(cropGroup);
+    m_cropStatusLabel->setObjectName(QStringLiteral("paperCropStatusLabel"));
     m_cropStatusLabel->setWordWrap(true);
     m_cropStatusLabel->setStyleSheet("color: palette(mid); font-size: 11px;");
     cropLayout->addWidget(m_cropStatusLabel);
@@ -104,18 +107,22 @@ VideoEffectsWidget::VideoEffectsWidget(QWidget *parent)
     m_cropLeftSlider = addSlider(marginLayout, tr("Crop left"), 0.0f, 0.45f, m_settings.paperCrop.left, [this](float value) {
         m_settings.paperCrop.left = value;
         emitSettingsChanged();
+        emit paperCropIntentEdited(m_settings.paperCrop);
     });
     m_cropTopSlider = addSlider(marginLayout, tr("Crop top"), 0.0f, 0.45f, m_settings.paperCrop.top, [this](float value) {
         m_settings.paperCrop.top = value;
         emitSettingsChanged();
+        emit paperCropIntentEdited(m_settings.paperCrop);
     });
     m_cropRightSlider = addSlider(marginLayout, tr("Crop right"), 0.0f, 0.45f, m_settings.paperCrop.right, [this](float value) {
         m_settings.paperCrop.right = value;
         emitSettingsChanged();
+        emit paperCropIntentEdited(m_settings.paperCrop);
     });
     m_cropBottomSlider = addSlider(marginLayout, tr("Crop bottom"), 0.0f, 0.45f, m_settings.paperCrop.bottom, [this](float value) {
         m_settings.paperCrop.bottom = value;
         emitSettingsChanged();
+        emit paperCropIntentEdited(m_settings.paperCrop);
     });
     cropLayout->addWidget(m_cropMarginsContainer);
 
@@ -123,6 +130,7 @@ VideoEffectsWidget::VideoEffectsWidget(QWidget *parent)
         m_settings.paperCrop.mode = static_cast<PaperCropMode>(m_cropModeCombo->currentData().toInt());
         updateCropControls();
         emitSettingsChanged();
+        emit paperCropIntentEdited(m_settings.paperCrop);
     });
     rootLayout->addWidget(cropGroup);
     updateCropControls();
@@ -266,7 +274,10 @@ VideoEffectsWidget::VideoEffectsWidget(QWidget *parent)
     // Reset button
     QPushButton *resetButton = new QPushButton(tr("Reset Adjustments"), this);
     resetButton->setObjectName("secondaryAction");
-    connect(resetButton, &QPushButton::clicked, this, &VideoEffectsWidget::reset);
+    connect(resetButton, &QPushButton::clicked, this, [this]() {
+        reset();
+        emit paperCropIntentEdited(m_settings.paperCrop);
+    });
     rootLayout->addWidget(resetButton);
 
     rootLayout->addStretch(1);
@@ -341,6 +352,15 @@ void VideoEffectsWidget::applySettings(const FilterPreviewWidget::VideoEffectsSe
     emitSettingsChanged();
 }
 
+void VideoEffectsWidget::applyPaperCropForScene(const PaperCropSettings &settings)
+{
+    m_paperDetected = false;
+    emit paperDetectionResetRequested();
+    auto sceneSettings = m_settings;
+    sceneSettings.paperCrop = settings;
+    applySettings(sceneSettings);
+}
+
 void VideoEffectsWidget::reset()
 {
     applySettings(FilterPreviewWidget::VideoEffectsSettings::defaults());
@@ -369,6 +389,15 @@ void VideoEffectsWidget::updateColorButton(QPushButton *button, const QColor &co
     button->setStyleSheet(css);
 }
 
+void VideoEffectsWidget::setPaperDetected(bool detected)
+{
+    if (m_paperDetected == detected) {
+        return;
+    }
+    m_paperDetected = detected;
+    updateCropControls();
+}
+
 void VideoEffectsWidget::updateCropControls()
 {
     if (!m_cropModeCombo || !m_cropMarginsContainer || !m_cropStatusLabel) {
@@ -378,10 +407,12 @@ void VideoEffectsWidget::updateCropControls()
     const auto mode = static_cast<PaperCropMode>(m_cropModeCombo->currentData().toInt());
     m_cropMarginsContainer->setEnabled(mode != PaperCropMode::Off);
     if (mode == PaperCropMode::Automatic) {
-        if (FilterPreviewWidget::automaticPaperCropAvailable()) {
-            m_cropStatusLabel->setText(tr("Detects the paper boundary and corrects perspective. The sliders are used as a fallback when detection is uncertain."));
+        if (!PaperCropProcessor::automaticDetectionAvailable()) {
+            m_cropStatusLabel->setText(tr("Automatic detection is unavailable in this build; the manual rectangle fallback is active."));
+        } else if (m_paperDetected) {
+            m_cropStatusLabel->setText(tr("Paper locked — automatic perspective crop is active."));
         } else {
-            m_cropStatusLabel->setText(tr("Automatic detection is unavailable in this build; the manual rectangle fallback will be used."));
+            m_cropStatusLabel->setText(tr("Searching for all four paper edges — the saved manual rectangle fallback is active."));
         }
     } else if (mode == PaperCropMode::Manual) {
         m_cropStatusLabel->setText(tr("Crops the preview, snapshots, and virtual-camera output to the saved rectangle."));

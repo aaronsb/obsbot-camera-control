@@ -267,17 +267,19 @@ When window is shown/restored:
 
 ### Scene Presets, Manual Positioning, and Paper Crop
 
-Presets now save a complete scene: tracking/manual mode, AI mode, pan, tilt, zoom, and paper-crop settings.
+Presets now save a complete scene: tracking/manual mode, AI mode and its focus/zoom/speed profile, pan, tilt, zoom, and paper-crop settings.
+
+On Tiny 2-family cameras, **Group**, **Human**, **Hand**, **Whiteboard**, and **Desk** each retain an independent focus policy, saved manual-focus position, AI auto-zoom setting, and tracking speed. Select a mode before editing these controls; switching back restores that mode's profile. Turning tracking off disables face focus and restores the retained manual-focus position before manual movement is authorized.
 
 **Create a fixed table view:**
-1. In **Tracking**, check **Enable manual positioning (turns tracking off)**.
+1. In **Tracking**, check **Enable manual positioning (turns tracking off)**. Manual intent remains latched until you explicitly re-enable tracking. The controls briefly show a waiting state and unlock only after the camera freshly confirms that tracking is off; if confirmation fails, movement stays disabled and an error is shown.
 2. Position and zoom the camera with the now-enabled manual controls.
-3. Enable the preview. In **Creative FX → Paper Crop**, choose **Manual rectangle** or **Automatic paper detection** and adjust the fallback crop sliders.
+3. Enable the preview. In **Creative FX → Paper Crop**, choose **Manual rectangle** or **Automatic paper detection** and adjust the fallback crop sliders. Automatic mode needs all four paper edges visible. Its status reports whether the page is locked or still being searched for; brief detection loss holds the last good boundary before using the saved manual fallback.
 4. In **Presets**, save this as the table scene.
 5. Re-enable tracking, configure the normal face view, disable paper crop, and save that as another scene.
 6. Recall scenes with their buttons or `Ctrl+1`, `Ctrl+2`, or `Ctrl+3`.
 
-For automatic framing in the **direct physical camera feed**, Tiny 2-family cameras can use **Use camera Desk mode for automatic paper framing**. Software paper detection and perspective correction affect the app preview, snapshots, and **OBSBOT Virtual Camera** output; conferencing software must select the virtual camera to receive that processed image.
+On Tiny 2-family cameras, selecting or recalling **Automatic paper detection** also switches to the saved **Desk** profile and persists crop and tracking together. Turning paper crop off leaves Desk mode active until another mode is selected explicitly. Desk mode controls framing in the **direct physical camera feed**; software paper detection and perspective correction affect only the app preview, snapshots, and **OBSBOT Virtual Camera** output. Conferencing software must select the virtual camera to receive that processed image.
 
 For a desktop-wide hotkey, bind:
 

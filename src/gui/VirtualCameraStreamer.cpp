@@ -59,7 +59,9 @@ bool convertRgbToYuyv(const QImage &image, QByteArray &outBuffer)
 {
     const int width = image.width();
     const int height = image.height();
-    if (width <= 0 || height <= 0) {
+    // YUYV stores pairs of pixels in four bytes; odd widths cannot be
+    // represented without crossing the row buffer boundary.
+    if (width <= 0 || height <= 0 || (width % 2) != 0) {
         return false;
     }
 
@@ -70,8 +72,7 @@ bool convertRgbToYuyv(const QImage &image, QByteArray &outBuffer)
         const uint8_t *src = reinterpret_cast<const uint8_t *>(image.constScanLine(y));
         uint8_t *rowPtr = dst + (y * width * 2);
 
-        int x = 0;
-        for (; x + 1 < width; x += 2) {
+        for (int x = 0; x < width; x += 2) {
             const uint8_t *p0 = src + (x * 3);
             const uint8_t *p1 = src + ((x + 1) * 3);
 
@@ -85,16 +86,6 @@ bool convertRgbToYuyv(const QImage &image, QByteArray &outBuffer)
             rowPtr[(x * 2) + 1] = u;
             rowPtr[(x * 2) + 2] = yuv1.y;
             rowPtr[(x * 2) + 3] = v;
-        }
-
-        if (x < width) {
-            const uint8_t *p0 = src + (x * 3);
-            const YuvComponents yuv0 = rgbToYuv(p0[0], p0[1], p0[2]);
-
-            rowPtr[(x * 2) + 0] = yuv0.y;
-            rowPtr[(x * 2) + 1] = yuv0.u;
-            rowPtr[(x * 2) + 2] = yuv0.y;
-            rowPtr[(x * 2) + 3] = yuv0.v;
         }
     }
 
@@ -141,7 +132,8 @@ public slots:
 
     void setForcedResolution(const QSize &resolution)
     {
-        const QSize normalized = resolution.isValid() ? resolution : QSize();
+        const QSize normalized =
+            VirtualCameraStreamer::normalizedOutputSize(resolution);
         if (normalized == m_forcedResolution) {
             return;
         }
@@ -233,49 +225,8 @@ private:
 
     QImage prepareFrame(const QImage &frame) const
     {
-        if (frame.isNull()) {
-            return QImage();
-        }
-
-        QImage image = frame;
-        if (image.format() != QImage::Format_RGB888) {
-            image = image.convertToFormat(QImage::Format_RGB888);
-            if (image.isNull()) {
-                qCWarning(VirtualCameraLog) << "Failed to convert frame to RGB888 format";
-                return QImage();
-            }
-        }
-
-        QSize targetSize = m_forcedResolution.isValid() ? m_forcedResolution : image.size();
-        if (targetSize.width() <= 0 || targetSize.height() <= 0) {
-            return QImage();
-        }
-
-        if (image.size() != targetSize) {
-            if (m_forcedResolution.isValid()) {
-                QImage scaled = image.scaled(targetSize, Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation);
-                if (scaled.isNull()) {
-                    qCWarning(VirtualCameraLog) << "Failed to scale frame to forced resolution" << targetSize;
-                    return QImage();
-                }
-
-                if (scaled.size() != targetSize) {
-                    const int xOffset = std::max(0, (scaled.width() - targetSize.width()) / 2);
-                    const int yOffset = std::max(0, (scaled.height() - targetSize.height()) / 2);
-                    image = scaled.copy(xOffset, yOffset, targetSize.width(), targetSize.height());
-                } else {
-                    image = scaled;
-                }
-            } else {
-                image = image.scaled(targetSize, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
-            }
-        }
-
-        if (image.format() != QImage::Format_RGB888) {
-            image = image.convertToFormat(QImage::Format_RGB888);
-        }
-
-        return image;
+        return VirtualCameraStreamer::prepareFrameForOutput(
+            frame, m_forcedResolution);
     }
 
     bool ensureDevice(int width, int height)
@@ -388,6 +339,70 @@ private:
     bool m_processing;
 };
 
+QSize VirtualCameraStreamer::normalizedOutputSize(const QSize &resolution)
+{
+    if (!resolution.isValid()) {
+        return QSize();
+    }
+    QSize normalized = resolution;
+    if ((normalized.width() % 2) != 0) {
+        normalized.setWidth(normalized.width() + 1);
+    }
+    return normalized;
+}
+
+QImage VirtualCameraStreamer::prepareFrameForOutput(
+    const QImage &frame, const QSize &forcedResolution)
+{
+    if (frame.isNull()) {
+        return QImage();
+    }
+
+    QImage image = frame.format() == QImage::Format_RGB888
+        ? frame : frame.convertToFormat(QImage::Format_RGB888);
+    if (image.isNull()) {
+        qCWarning(VirtualCameraLog) << "Failed to convert frame to RGB888 format";
+        return QImage();
+    }
+
+    const QSize targetSize = normalizedOutputSize(
+        forcedResolution.isValid() ? forcedResolution : image.size());
+    if (!targetSize.isValid()) {
+        return QImage();
+    }
+
+    if (image.size() != targetSize) {
+        if (forcedResolution.isValid()) {
+            QImage scaled = image.scaled(
+                targetSize, Qt::KeepAspectRatioByExpanding,
+                Qt::SmoothTransformation);
+            if (scaled.isNull()) {
+                qCWarning(VirtualCameraLog)
+                    << "Failed to scale frame to forced resolution" << targetSize;
+                return QImage();
+            }
+            if (scaled.size() != targetSize) {
+                const int xOffset = std::max(
+                    0, (scaled.width() - targetSize.width()) / 2);
+                const int yOffset = std::max(
+                    0, (scaled.height() - targetSize.height()) / 2);
+                image = scaled.copy(
+                    xOffset, yOffset, targetSize.width(), targetSize.height());
+            } else {
+                image = scaled;
+            }
+        } else {
+            image = image.scaled(
+                targetSize, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+        }
+    }
+
+    if (image.format() != QImage::Format_RGB888) {
+        image = image.convertToFormat(QImage::Format_RGB888);
+    }
+    return image;
+}
+
 VirtualCameraStreamer::VirtualCameraStreamer(QObject *parent)
     : QObject(parent)
     , m_devicePath(QString::fromLatin1(kDefaultDevicePath))
@@ -450,7 +465,7 @@ void VirtualCameraStreamer::setEnabled(bool enabled)
 
 void VirtualCameraStreamer::setForcedResolution(const QSize &resolution)
 {
-    const QSize normalized = resolution.isValid() ? resolution : QSize();
+    const QSize normalized = normalizedOutputSize(resolution);
     if (normalized == m_forcedResolution) {
         return;
     }

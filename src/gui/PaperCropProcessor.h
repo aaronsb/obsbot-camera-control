@@ -17,6 +17,7 @@ public:
 
     QImage process(const QImage &image, const PaperCropSettings &settings);
     bool paperDetected() const;
+    void reset();
 
     static bool automaticDetectionAvailable();
 

@@ -85,9 +85,11 @@ public:
     void updateVideoFrame(const QVideoFrame &frame);
     static bool automaticPaperCropAvailable();
     bool paperDetected() const;
+    void resetPaperDetection();
 
 signals:
     void processedFrameReady(const QImage &frame);
+    void paperDetectionChanged(bool detected);
 
 protected:
     void initializeGL() override;
@@ -99,7 +101,7 @@ private:
     void ensureGeometry();
     void ensureFramebuffer(const QSize &size);
     void uploadTextureIfNeeded();
-    void renderToCurrentTarget(const QSize &targetSize);
+    void renderToCurrentTarget(const QSize &targetSize, bool useDevicePixelRatio);
     void applyEffectsUniforms();
     QVector3D srgbColorToLinearVec3(const QColor &color) const;
 
@@ -111,6 +113,7 @@ private:
     bool m_emitPending;
     VideoEffectsSettings m_effectSettings;
     PaperCropProcessor m_paperCropProcessor;
+    bool m_lastPaperDetected;
 
     std::unique_ptr<QOpenGLShaderProgram> m_program;
     std::unique_ptr<QOpenGLTexture> m_texture;

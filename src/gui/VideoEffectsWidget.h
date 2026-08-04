@@ -24,10 +24,14 @@ public:
 
 signals:
     void effectsChanged(const FilterPreviewWidget::VideoEffectsSettings &settings);
+    void paperCropIntentEdited(const PaperCropSettings &settings);
+    void paperDetectionResetRequested();
 
 public slots:
     void applySettings(const FilterPreviewWidget::VideoEffectsSettings &settings);
+    void applyPaperCropForScene(const PaperCropSettings &settings);
     void reset();
+    void setPaperDetected(bool detected);
 
 private:
     QSlider *createSlider(QWidget *parent) const;
@@ -41,6 +45,7 @@ private:
     QComboBox *m_cropModeCombo;
     QWidget *m_cropMarginsContainer;
     QLabel *m_cropStatusLabel;
+    bool m_paperDetected;
     QSlider *m_cropLeftSlider;
     QSlider *m_cropTopSlider;
     QSlider *m_cropRightSlider;

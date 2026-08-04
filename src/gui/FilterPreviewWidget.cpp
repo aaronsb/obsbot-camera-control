@@ -199,6 +199,16 @@ void FilterPreviewWidget::setVideoEffects(const VideoEffectsSettings &settings)
     update();
 }
 
+bool FilterPreviewWidget::automaticPaperCropAvailable()
+{
+    return PaperCropProcessor::automaticDetectionAvailable();
+}
+
+bool FilterPreviewWidget::paperDetected() const
+{
+    return m_paperCropProcessor.paperDetected();
+}
+
 void FilterPreviewWidget::updateVideoFrame(const QVideoFrame &frame)
 {
     QVideoFrame copy(frame);
@@ -207,6 +217,11 @@ void FilterPreviewWidget::updateVideoFrame(const QVideoFrame &frame)
     }
 
     QImage image = copy.toImage();
+    if (image.isNull()) {
+        return;
+    }
+
+    image = m_paperCropProcessor.process(image, m_effectSettings.paperCrop);
     if (image.isNull()) {
         return;
     }

@@ -1,5 +1,7 @@
 #include "PTZControlWidget.h"
 #include "CameraSettingsWidget.h"
+#include "TrackingControlWidget.h"
+#include "VideoEffectsWidget.h"
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QKeySequence>
@@ -10,6 +12,8 @@ PTZControlWidget::PTZControlWidget(CameraController *controller, QWidget *parent
     : QWidget(parent)
     , m_controller(controller)
     , m_settingsWidget(nullptr)
+    , m_trackingWidget(nullptr)
+    , m_effectsWidget(nullptr)
     , m_cameraAvailable(controller->isConnected())
 {
     QVBoxLayout *layout = new QVBoxLayout(this);
@@ -42,6 +46,12 @@ PTZControlWidget::PTZControlWidget(CameraController *controller, QWidget *parent
         presetUi.pan = 0.0;
         presetUi.tilt = 0.0;
         presetUi.zoom = 1.0;
+        presetUi.sceneDefined = false;
+        presetUi.trackingEnabled = false;
+        presetUi.aiMode = 0;
+        presetUi.aiSubMode = 0;
+        presetUi.autoZoom = false;
+        presetUi.paperCrop = {};
 
         QHBoxLayout *row = new QHBoxLayout();
         row->setSpacing(8);
@@ -130,6 +140,12 @@ void PTZControlWidget::applyPresetStates(const std::array<PresetState, 3> &prese
         ui.pan = preset.pan;
         ui.tilt = preset.tilt;
         ui.zoom = preset.zoom;
+        ui.sceneDefined = preset.sceneDefined;
+        ui.trackingEnabled = preset.trackingEnabled;
+        ui.aiMode = preset.aiMode;
+        ui.aiSubMode = preset.aiSubMode;
+        ui.autoZoom = preset.autoZoom;
+        ui.paperCrop = preset.paperCrop;
         updatePresetLabel(i);
     }
 }
@@ -139,28 +155,71 @@ std::array<PTZControlWidget::PresetState, 3> PTZControlWidget::currentPresets() 
     std::array<PresetState, 3> out{};
     for (int i = 0; i < 3; ++i) {
         const auto &ui = m_presets[static_cast<size_t>(i)];
-        out[static_cast<size_t>(i)] = {ui.defined, ui.pan, ui.tilt, ui.zoom};
+        out[static_cast<size_t>(i)] = {
+            ui.defined,
+            ui.pan,
+            ui.tilt,
+            ui.zoom,
+            ui.sceneDefined,
+            ui.trackingEnabled,
+            ui.aiMode,
+            ui.aiSubMode,
+            ui.autoZoom,
+            ui.paperCrop
+        };
     }
     return out;
 }
 
-bool PTZControlWidget::recallPreset(int index)
+bool PTZControlWidget::canRecallPreset(int index) const
 {
-    if (!m_cameraAvailable || index < 0 || index >= static_cast<int>(m_presets.size())) {
+    if (index < 0 || index >= static_cast<int>(m_presets.size())) {
         return false;
     }
 
     const auto &preset = m_presets[static_cast<size_t>(index)];
-    const bool valid = std::isfinite(preset.pan) && preset.pan >= -1.0 && preset.pan <= 1.0
+    return preset.defined
+        && std::isfinite(preset.pan) && preset.pan >= -1.0 && preset.pan <= 1.0
         && std::isfinite(preset.tilt) && preset.tilt >= -1.0 && preset.tilt <= 1.0
-        && std::isfinite(preset.zoom) && preset.zoom >= 1.0 && preset.zoom <= 2.0;
-    if (!preset.defined || !valid) {
+        && std::isfinite(preset.zoom) && preset.zoom >= 1.0 && preset.zoom <= 2.0
+        && (!preset.sceneDefined || preset.paperCrop.isValid());
+}
+
+bool PTZControlWidget::recallPreset(int index)
+{
+    if (!m_cameraAvailable || !canRecallPreset(index)) {
         return false;
+    }
+
+    const auto &preset = m_presets[static_cast<size_t>(index)];
+
+    if (preset.sceneDefined && m_effectsWidget) {
+        auto effects = m_effectsWidget->settings();
+        effects.paperCrop = preset.paperCrop;
+        m_effectsWidget->applySettings(effects);
+    }
+
+    bool trackingApplied = true;
+    if (preset.sceneDefined && m_trackingWidget) {
+        trackingApplied = m_trackingWidget->applyTrackingState({
+            preset.trackingEnabled,
+            preset.aiMode,
+            preset.aiSubMode,
+            preset.autoZoom
+        });
+    } else if (!preset.sceneDefined && m_trackingWidget) {
+        auto tracking = m_trackingWidget->trackingState();
+        tracking.enabled = false;
+        trackingApplied = m_trackingWidget->applyTrackingState(tracking);
+    }
+
+    if (preset.sceneDefined && preset.trackingEnabled) {
+        return trackingApplied;
     }
 
     const bool panTiltApplied = m_controller->setPanTilt(preset.pan, preset.tilt);
     const bool zoomApplied = m_controller->setZoom(preset.zoom);
-    return panTiltApplied && zoomApplied;
+    return trackingApplied && panTiltApplied && zoomApplied;
 }
 
 void PTZControlWidget::onRecallPreset()
@@ -192,9 +251,20 @@ void PTZControlWidget::onStorePreset()
     preset.pan = state.pan;
     preset.tilt = state.tilt;
     preset.zoom = state.zoom;
+    if (m_trackingWidget) {
+        const auto tracking = m_trackingWidget->trackingState();
+        preset.sceneDefined = true;
+        preset.trackingEnabled = tracking.enabled;
+        preset.aiMode = tracking.aiMode;
+        preset.aiSubMode = tracking.aiSubMode;
+        preset.autoZoom = tracking.autoZoom;
+    }
+    if (m_effectsWidget) {
+        preset.paperCrop = m_effectsWidget->settings().paperCrop;
+    }
     updatePresetLabel(index);
 
-    emit presetUpdated(index, preset.pan, preset.tilt, preset.zoom, true);
+    emit presetUpdated(index);
 }
 
 void PTZControlWidget::updatePresetLabel(int index)
@@ -208,11 +278,35 @@ void PTZControlWidget::updatePresetLabel(int index)
     }
 
     if (preset.defined) {
-        preset.statusLabel->setText(
-            QString("Pan %1, Tilt %2, Zoom %3x")
-                .arg(preset.pan, 0, 'f', 2)
-                .arg(preset.tilt, 0, 'f', 2)
-                .arg(preset.zoom, 0, 'f', 1));
+        QString modeLabel = tr("Position");
+        if (preset.sceneDefined) {
+            if (!preset.trackingEnabled) {
+                modeLabel = tr("Manual");
+            } else if (preset.aiMode == 5) {
+                modeLabel = tr("Desk tracking");
+            } else {
+                modeLabel = tr("Tracking");
+            }
+        }
+
+        QString cropLabel;
+        if (preset.paperCrop.mode == PaperCropMode::Automatic) {
+            cropLabel = tr(" · Auto crop");
+        } else if (preset.paperCrop.mode == PaperCropMode::Manual) {
+            cropLabel = tr(" · Manual crop");
+        }
+
+        if (preset.sceneDefined && preset.trackingEnabled) {
+            preset.statusLabel->setText(modeLabel + cropLabel);
+        } else {
+            preset.statusLabel->setText(
+                QString("%1 · Pan %2, Tilt %3, Zoom %4x%5")
+                    .arg(modeLabel)
+                    .arg(preset.pan, 0, 'f', 2)
+                    .arg(preset.tilt, 0, 'f', 2)
+                    .arg(preset.zoom, 0, 'f', 1)
+                    .arg(cropLabel));
+        }
     } else {
         preset.statusLabel->setText("Empty");
     }

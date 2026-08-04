@@ -94,6 +94,7 @@ public:
 
     // Tracking controls
     bool enableAutoFraming(bool enabled);
+    bool enterAutoFramingMediaMode();
     bool setAiMode(int mode, int subMode);
     bool setAutoZoom(bool enabled);
     bool setTrackSpeed(int speedMode);

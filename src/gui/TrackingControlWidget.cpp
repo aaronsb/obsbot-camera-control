@@ -57,6 +57,12 @@ TrackingControlWidget::TrackingControlWidget(CameraController *controller, QWidg
     modeLayout->addWidget(m_modeCombo, 1);
     advancedLayout->addLayout(modeLayout);
 
+    m_deskModeCheckBox = new QCheckBox(tr("Use camera Desk mode for automatic paper framing (direct feed)"), this);
+    m_deskModeCheckBox->setStyleSheet("font-size: 11px;");
+    connect(m_deskModeCheckBox, &QCheckBox::toggled,
+            this, &TrackingControlWidget::onDeskModeToggled);
+    advancedLayout->addWidget(m_deskModeCheckBox);
+
     QHBoxLayout *subModeLayout = new QHBoxLayout();
     QLabel *subModeLabel = new QLabel("Human Sub-Mode", this);
     subModeLabel->setStyleSheet("font-size: 11px; font-weight: 600;");
@@ -111,9 +117,15 @@ TrackingControlWidget::TrackingControlWidget(CameraController *controller, QWidg
     ptzContainerLayout->setContentsMargins(0, 0, 0, 0);
     ptzContainerLayout->setSpacing(0);
 
-    QGroupBox *ptzGroupBox = new QGroupBox("Manual Camera Control", this);
-    ptzGroupBox->setFlat(true);
-    QVBoxLayout *ptzGroupLayout = new QVBoxLayout(ptzGroupBox);
+    m_manualControlCheckBox = new QCheckBox(tr("Enable manual positioning (turns tracking off)"), m_ptzContainer);
+    m_manualControlCheckBox->setChecked(true);
+    connect(m_manualControlCheckBox, &QCheckBox::toggled,
+            this, &TrackingControlWidget::onManualControlToggled);
+    ptzContainerLayout->addWidget(m_manualControlCheckBox);
+
+    m_ptzGroupBox = new QGroupBox("Manual Camera Control", this);
+    m_ptzGroupBox->setFlat(true);
+    QVBoxLayout *ptzGroupLayout = new QVBoxLayout(m_ptzGroupBox);
     ptzGroupLayout->setContentsMargins(16, 16, 16, 16);
     ptzGroupLayout->setSpacing(12);
 
@@ -186,13 +198,61 @@ TrackingControlWidget::TrackingControlWidget(CameraController *controller, QWidg
     m_positionLabel->setStyleSheet("color: palette(mid); font-size: 11px;");
     ptzGroupLayout->addWidget(m_positionLabel);
 
-    ptzContainerLayout->addWidget(ptzGroupBox);
+    ptzContainerLayout->addWidget(m_ptzGroupBox);
     layout->addWidget(m_ptzContainer);
 
     // Update PTZ controls state based on auto-framing
     updatePTZControlsState();
 
     layout->addStretch();
+}
+
+bool TrackingControlWidget::isManualControlEnabled() const
+{
+    return m_manualControlCheckBox && m_manualControlCheckBox->isChecked();
+}
+
+TrackingControlWidget::TrackingState TrackingControlWidget::trackingState() const
+{
+    return {
+        isTrackingEnabled(),
+        currentAiMode(),
+        currentHumanSubMode(),
+        isAutoZoomEnabled()
+    };
+}
+
+void TrackingControlWidget::setTrackingEnabled(bool enabled)
+{
+    QSignalBlocker trackingBlocker(m_trackingCheckBox);
+    m_trackingCheckBox->setChecked(enabled);
+    updatePTZControlsState();
+}
+
+bool TrackingControlWidget::applyTrackingState(const TrackingState &state)
+{
+    setAiMode(state.aiMode);
+    setHumanSubMode(state.aiSubMode);
+    setAutoZoomEnabled(state.autoZoom);
+    setTrackingEnabled(state.enabled);
+
+    m_userInitiated = true;
+    bool applied = true;
+    if (m_tiny2Capabilities) {
+        const int mode = state.enabled ? state.aiMode : Device::AiWorkModeNone;
+        if (state.enabled) {
+            applied = m_controller->enterAutoFramingMediaMode();
+        }
+        applied = m_controller->setAiMode(mode, state.enabled ? state.aiSubMode : 0) && applied;
+        applied = m_controller->setAutoZoom(state.enabled && state.autoZoom) && applied;
+        if (!state.enabled) {
+            applied = m_controller->enableAutoFraming(false) && applied;
+        }
+    } else {
+        applied = m_controller->enableAutoFraming(state.enabled);
+    }
+    m_commandTimer->start(1000);
+    return applied;
 }
 
 void TrackingControlWidget::setAiMode(int mode)
@@ -412,6 +472,8 @@ void TrackingControlWidget::onModeChanged(int index)
         m_trackingCheckBox->setChecked(shouldCheck);
         m_trackingCheckBox->blockSignals(false);
     }
+    updatePTZControlsState();
+    updateTiny2Visibility();
 
     m_commandTimer->start(1000);
 }
@@ -455,6 +517,25 @@ void TrackingControlWidget::onAudioGainToggled(bool checked)
     m_commandTimer->start(1000);
 }
 
+void TrackingControlWidget::onManualControlToggled(bool checked)
+{
+    const bool trackingShouldBeEnabled = !checked;
+    if (m_trackingCheckBox->isChecked() != trackingShouldBeEnabled) {
+        m_trackingCheckBox->setChecked(trackingShouldBeEnabled);
+    } else {
+        updatePTZControlsState();
+    }
+}
+
+void TrackingControlWidget::onDeskModeToggled(bool checked)
+{
+    const int targetMode = checked ? Device::AiWorkModeDesk : Device::AiWorkModeHuman;
+    const int index = m_modeCombo->findData(targetMode);
+    if (index >= 0 && m_modeCombo->currentIndex() != index) {
+        m_modeCombo->setCurrentIndex(index);
+    }
+}
+
 void TrackingControlWidget::updateTiny2Visibility()
 {
     if (!m_advancedContainer) {
@@ -463,13 +544,23 @@ void TrackingControlWidget::updateTiny2Visibility()
 
     m_advancedContainer->setVisible(m_tiny2Capabilities);
     m_humanSubModeCombo->setEnabled(m_tiny2Capabilities && m_modeCombo->currentData().toInt() == Device::AiWorkModeHuman);
+    if (m_deskModeCheckBox) {
+        QSignalBlocker blocker(m_deskModeCheckBox);
+        m_deskModeCheckBox->setChecked(
+            m_tiny2Capabilities && m_modeCombo->currentData().toInt() == Device::AiWorkModeDesk);
+    }
 }
 
 void TrackingControlWidget::updatePTZControlsState()
 {
-    // Disable PTZ controls when auto-framing is enabled
-    bool enabled = !m_trackingCheckBox->isChecked();
-    m_ptzContainer->setEnabled(enabled);
+    const bool manualEnabled = !m_trackingCheckBox->isChecked();
+    if (m_manualControlCheckBox) {
+        QSignalBlocker blocker(m_manualControlCheckBox);
+        m_manualControlCheckBox->setChecked(manualEnabled);
+    }
+    if (m_ptzGroupBox) {
+        m_ptzGroupBox->setEnabled(manualEnabled);
+    }
 }
 
 void TrackingControlWidget::flushPendingCommands()

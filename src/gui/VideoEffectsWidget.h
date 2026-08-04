@@ -7,8 +7,11 @@
 #include <functional>
 
 class QCheckBox;
-class QSlider;
+class QComboBox;
+class QLabel;
 class QPushButton;
+class QSlider;
+class QWidget;
 
 class VideoEffectsWidget : public QWidget
 {
@@ -31,9 +34,17 @@ private:
     void bindSlider(QSlider *slider, float min, float max, std::function<void(float)> setter, float initial);
     void updateColorButton(QPushButton *button, const QColor &color);
     void emitSettingsChanged();
+    void updateCropControls();
 
     FilterPreviewWidget::VideoEffectsSettings m_settings;
     QCheckBox *m_horizontalFlipCheckBox;
+    QComboBox *m_cropModeCombo;
+    QWidget *m_cropMarginsContainer;
+    QLabel *m_cropStatusLabel;
+    QSlider *m_cropLeftSlider;
+    QSlider *m_cropTopSlider;
+    QSlider *m_cropRightSlider;
+    QSlider *m_cropBottomSlider;
     QPushButton *m_shadowColorButton;
     QPushButton *m_highlightColorButton;
 };

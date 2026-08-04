@@ -1,6 +1,8 @@
 #ifndef PTZCONTROLWIDGET_H
 #define PTZCONTROLWIDGET_H
 
+#include "PaperCropSettings.h"
+
 #include <QWidget>
 #include <QPushButton>
 #include <QSlider>
@@ -10,6 +12,8 @@
 #include "CameraController.h"
 
 class CameraSettingsWidget;
+class TrackingControlWidget;
+class VideoEffectsWidget;
 
 /**
  * @brief Widget for camera preset management
@@ -25,15 +29,28 @@ public:
     void setCameraSettingsWidget(CameraSettingsWidget *settingsWidget) {
         m_settingsWidget = settingsWidget;
     }
+    void setTrackingControlWidget(TrackingControlWidget *trackingWidget) {
+        m_trackingWidget = trackingWidget;
+    }
+    void setVideoEffectsWidget(VideoEffectsWidget *effectsWidget) {
+        m_effectsWidget = effectsWidget;
+    }
 
     struct PresetState {
         bool defined;
         double pan;
         double tilt;
         double zoom;
+        bool sceneDefined;
+        bool trackingEnabled;
+        int aiMode;
+        int aiSubMode;
+        bool autoZoom;
+        PaperCropSettings paperCrop;
     };
     void applyPresetStates(const std::array<PresetState, 3> &presets);
     std::array<PresetState, 3> currentPresets() const;
+    bool canRecallPreset(int index) const;
     bool recallPreset(int index);
 
     struct ImagePresetState {
@@ -55,7 +72,7 @@ public:
     std::array<ImagePresetState, 3> currentImagePresets() const;
 
 signals:
-    void presetUpdated(int index, double pan, double tilt, double zoom, bool defined);
+    void presetUpdated(int index);
     void imagePresetUpdated(int index);
 
 private slots:
@@ -67,6 +84,8 @@ private slots:
 private:
     CameraController *m_controller;
     CameraSettingsWidget *m_settingsWidget;
+    TrackingControlWidget *m_trackingWidget;
+    VideoEffectsWidget *m_effectsWidget;
     bool m_cameraAvailable;
 
     struct PresetUi {
@@ -77,6 +96,12 @@ private:
         double pan;
         double tilt;
         double zoom;
+        bool sceneDefined;
+        bool trackingEnabled;
+        int aiMode;
+        int aiSubMode;
+        bool autoZoom;
+        PaperCropSettings paperCrop;
     };
 
     struct ImagePresetUi {

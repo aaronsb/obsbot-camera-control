@@ -11,6 +11,11 @@ void printPresetList(std::ostream &out, const Config::CameraSettings &settings)
         const auto &preset = settings.presets[i];
         out << "Preset " << (i + 1) << ": ";
         if (preset.defined) {
+            if (preset.sceneDefined) {
+                out << (preset.trackingEnabled ? "tracking" : "manual")
+                    << ", AI mode " << preset.aiMode
+                    << ", crop mode " << preset.paperCropMode << ", ";
+            }
             out << "pan " << preset.pan << ", tilt " << preset.tilt
                 << ", zoom " << preset.zoom << "x";
         } else {
@@ -29,12 +34,39 @@ bool applyPresetToCamera(std::shared_ptr<Device> device,
         && std::isfinite(preset.tilt) && preset.tilt >= -1.0 && preset.tilt <= 1.0
         && std::isfinite(preset.zoom) && preset.zoom >= 1.0 && preset.zoom <= 2.0;
     if (!preset.defined || !valid) {
-        errors << "Refusing to apply an undefined or invalid position preset." << '\n';
+        errors << "Refusing to apply an undefined or invalid scene preset." << '\n';
         return false;
     }
 
-    progress << "Applying position preset: pan " << preset.pan
+    progress << "Applying scene preset: pan " << preset.pan
              << ", tilt " << preset.tilt << ", zoom " << preset.zoom << "x" << '\n';
+
+    bool trackingApplied = true;
+    if (preset.sceneDefined && preset.trackingEnabled) {
+        const int32_t mediaResult = device->cameraSetMediaModeU(Device::MediaModeAutoFrame);
+        const int32_t aiResult = device->cameraSetAiModeU(
+            static_cast<Device::AiWorkModeType>(preset.aiMode), preset.aiSubMode);
+        const int32_t autoZoomResult = device->aiSetAiAutoZoomR(preset.autoZoom);
+        trackingApplied = mediaResult == 0 && aiResult == 0 && autoZoomResult == 0;
+        if (!trackingApplied) {
+            errors << "  Failed to restore the saved tracking mode." << '\n';
+        }
+    } else {
+        const int32_t aiResult = device->cameraSetAiModeU(Device::AiWorkModeNone);
+        const int32_t mediaResult = device->cameraSetMediaModeU(Device::MediaModeNormal);
+        trackingApplied = aiResult == 0 && mediaResult == 0;
+        if (!trackingApplied) {
+            errors << "  Failed to disable tracking before manual positioning." << '\n';
+        }
+    }
+
+    if (preset.paperCropMode != 0) {
+        progress << "  Software paper crop is applied by the running GUI/virtual camera." << '\n';
+    }
+
+    if (preset.sceneDefined && preset.trackingEnabled) {
+        return trackingApplied;
+    }
 
     const int32_t panTiltResult = device->cameraSetPanTiltAbsolute(preset.pan, preset.tilt);
     if (panTiltResult != 0) {
@@ -46,5 +78,5 @@ bool applyPresetToCamera(std::shared_ptr<Device> device,
         errors << "  Failed to set zoom (code: " << zoomResult << ")" << '\n';
     }
 
-    return panTiltResult == 0 && zoomResult == 0;
+    return trackingApplied && panTiltResult == 0 && zoomResult == 0;
 }

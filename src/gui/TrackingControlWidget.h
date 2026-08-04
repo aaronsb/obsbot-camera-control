@@ -27,12 +27,18 @@ public:
 
     void updateFromState(const CameraController::CameraState &state);
     void setV4l2Mode(bool v4l2Only);
+    struct TrackingState {
+        bool enabled = false;
+        int aiMode = 0;
+        int aiSubMode = 0;
+        bool autoZoom = false;
+    };
+
     bool isTrackingEnabled() const { return m_trackingCheckBox->isChecked(); }
-    void setTrackingEnabled(bool enabled) {
-        m_trackingCheckBox->blockSignals(true);
-        m_trackingCheckBox->setChecked(enabled);
-        m_trackingCheckBox->blockSignals(false);
-    }
+    bool isManualControlEnabled() const;
+    TrackingState trackingState() const;
+    void setTrackingEnabled(bool enabled);
+    bool applyTrackingState(const TrackingState &state);
     void setAiMode(int mode);
     void setHumanSubMode(int subMode);
     void setAutoZoomEnabled(bool enabled);
@@ -56,6 +62,8 @@ private slots:
     void onAutoZoomToggled(bool checked);
     void onSpeedChanged(int index);
     void onAudioGainToggled(bool checked);
+    void onManualControlToggled(bool checked);
+    void onDeskModeToggled(bool checked);
 
     // Manual PTZ control slots
     void onXYPadChanged(float x, float y);
@@ -68,6 +76,7 @@ private:
     QComboBox *m_modeCombo;
     QComboBox *m_humanSubModeCombo;
     QCheckBox *m_autoZoomCheckBox;
+    QCheckBox *m_deskModeCheckBox;
     QComboBox *m_speedCombo;
     QCheckBox *m_audioGainCheckBox;
     QWidget *m_advancedContainer;
@@ -79,6 +88,8 @@ private:
     XYPad *m_xyPad;
     QCheckBox *m_invertControlsCheckBox;
     QCheckBox *m_mirrorCheckBox;
+    QCheckBox *m_manualControlCheckBox;
+    QGroupBox *m_ptzGroupBox;
     QSlider *m_zoomSlider;
     QLabel *m_zoomLabel;
     QSlider *m_focusSlider;

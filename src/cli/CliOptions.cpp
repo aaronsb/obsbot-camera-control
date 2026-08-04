@@ -116,13 +116,13 @@ void printCliUsage(std::ostream &out, const char *programName)
         << "\nUsage: " << programName << " [options]\n"
         << "\nActions (choose at most one):\n"
         << "  -i, --interactive       Run in interactive menu mode\n"
-        << "  -p, --preset N          Recall saved position preset N (1-3)\n"
-        << "      --list-presets      Show configured position presets and exit\n"
+        << "  -p, --preset N          Recall saved scene preset N (1-3)\n"
+        << "      --list-presets      Show configured scene presets and exit\n"
         << "\nOptions:\n"
         << "      --serial SERIAL     Target an exact camera serial number\n"
         << "  -h, --help              Show this help message\n"
         << "\nDefault behavior:\n"
         << "  Loads ~/.config/obsbot-control/settings.conf, applies all settings,\n"
         << "  and exits. Bind 'obsbot-cli --preset N' to a desktop global shortcut\n"
-        << "  for quick position changes.\n";
+        << "  for quick scene changes.\n";
 }

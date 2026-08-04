@@ -6,6 +6,7 @@
 #include <QWidget>
 #include <QIcon>
 #include <QEvent>
+#include <QEventLoop>
 #include <QWindowStateChangeEvent>
 #include <QApplication>
 #include <QCoreApplication>
@@ -33,6 +34,8 @@
 #include <QClipboard>
 #include <QDateTime>
 #include <QDir>
+#include <QDBusConnection>
+#include <QDBusError>
 #include <QFile>
 #include <QFileInfo>
 #include <QStandardPaths>
@@ -185,6 +188,17 @@ MainWindow::MainWindow(QWidget *parent)
     setupUI();
     setupTrayIcon();
 
+    QDBusConnection sessionBus = QDBusConnection::sessionBus();
+    if (sessionBus.registerService(QStringLiteral("com.obsbot.CameraControl"))) {
+        m_dbusRegistered = sessionBus.registerObject(
+            QStringLiteral("/CameraControl"),
+            this,
+            QDBusConnection::ExportScriptableSlots);
+        if (!m_dbusRegistered) {
+            sessionBus.unregisterService(QStringLiteral("com.obsbot.CameraControl"));
+        }
+    }
+
     // Load configuration
     loadConfiguration();
 
@@ -215,6 +229,12 @@ MainWindow::MainWindow(QWidget *parent)
 
 MainWindow::~MainWindow()
 {
+    if (m_dbusRegistered) {
+        QDBusConnection sessionBus = QDBusConnection::sessionBus();
+        sessionBus.unregisterObject(QStringLiteral("/CameraControl"));
+        sessionBus.unregisterService(QStringLiteral("com.obsbot.CameraControl"));
+    }
+
     // Save config on exit
     if (m_controller->isConnected()) {
         m_controller->saveConfig();
@@ -224,6 +244,42 @@ MainWindow::~MainWindow()
 bool MainWindow::isStartingMinimized() const
 {
     return m_controller->getConfig().getSettings().startMinimized;
+}
+
+bool MainWindow::recallPreset(int presetNumber)
+{
+    const int index = presetNumber - 1;
+    if (!m_ptzWidget || !m_ptzWidget->canRecallPreset(index)) {
+        return false;
+    }
+
+    if (m_controller->isConnected()) {
+        return m_ptzWidget->recallPreset(index);
+    }
+    if (m_pendingRemotePreset >= 0) {
+        return false;
+    }
+
+    m_pendingRemotePreset = index;
+    bool recalled = false;
+    QEventLoop waitForRecall;
+    QTimer timeout;
+    timeout.setSingleShot(true);
+    timeout.setInterval(5000);
+    connect(&timeout, &QTimer::timeout, &waitForRecall, &QEventLoop::quit);
+    connect(m_controller, &CameraController::cameraConnected, &waitForRecall,
+            [this, index, &waitForRecall, &recalled](const CameraController::CameraInfo &) {
+                QTimer::singleShot(150, &waitForRecall, [this, index, &waitForRecall, &recalled]() {
+                    recalled = m_ptzWidget->recallPreset(index);
+                    waitForRecall.quit();
+                });
+            });
+
+    m_controller->connectToCamera();
+    timeout.start();
+    waitForRecall.exec();
+    m_pendingRemotePreset = -1;
+    return recalled;
 }
 
 void MainWindow::setupUI()
@@ -407,6 +463,7 @@ void MainWindow::setupUI()
     m_ptzWidget = new PTZControlWidget(m_controller, this);
     m_settingsWidget = new CameraSettingsWidget(m_controller, this);
     m_ptzWidget->setCameraSettingsWidget(m_settingsWidget);
+    m_ptzWidget->setTrackingControlWidget(m_trackingWidget);
     connect(m_ptzWidget, &PTZControlWidget::presetUpdated,
             this, &MainWindow::onPresetUpdated);
 
@@ -417,6 +474,7 @@ void MainWindow::setupUI()
     m_tabWidget->addTab(m_ptzWidget, tr("Presets"));
     m_tabWidget->addTab(m_settingsWidget, tr("Camera Image"));
     m_effectsWidget = new VideoEffectsWidget(this);
+    m_ptzWidget->setVideoEffectsWidget(m_effectsWidget);
     connect(m_effectsWidget, &VideoEffectsWidget::effectsChanged,
             this, &MainWindow::onVideoEffectsChanged);
     // Mirror checkbox in tracking tab syncs with Creative FX horizontal flip
@@ -1057,7 +1115,10 @@ void MainWindow::onCameraConnected(const CameraController::CameraInfo &info)
     m_settingsWidget->setV4l2Mode(v4l2Mode);
 
     QTimer::singleShot(100, this, [this]() {
-        if (m_isCameraSwitch) {
+        if (m_pendingRemotePreset >= 0) {
+            // The synchronous D-Bus recall path owns this connection cycle.
+            return;
+        } else if (m_isCameraSwitch) {
             // Pull the new camera's actual state into the UI
             // without pushing the old camera's state back
             auto state = m_controller->getCurrentState();
@@ -1258,6 +1319,16 @@ void MainWindow::loadConfiguration()
     m_settingsWidget->setWhiteBalance(settings.whiteBalance);
     m_previewWidget->setPreferredFormatId(QString::fromStdString(settings.previewFormat));
 
+    auto effects = m_effectsWidget->settings();
+    effects.paperCrop = {
+        static_cast<PaperCropMode>(settings.paperCropMode),
+        static_cast<float>(settings.paperCropLeft),
+        static_cast<float>(settings.paperCropTop),
+        static_cast<float>(settings.paperCropRight),
+        static_cast<float>(settings.paperCropBottom)
+    };
+    m_effectsWidget->applySettings(effects);
+
     std::array<PTZControlWidget::PresetState, 3> presetStates{};
     for (int i = 0; i < 3; ++i) {
         const auto &preset = settings.presets[static_cast<size_t>(i)];
@@ -1265,7 +1336,19 @@ void MainWindow::loadConfiguration()
             preset.defined,
             preset.pan,
             preset.tilt,
-            preset.zoom
+            preset.zoom,
+            preset.sceneDefined,
+            preset.trackingEnabled,
+            preset.aiMode,
+            preset.aiSubMode,
+            preset.autoZoom,
+            {
+                static_cast<PaperCropMode>(preset.paperCropMode),
+                static_cast<float>(preset.paperCropLeft),
+                static_cast<float>(preset.paperCropTop),
+                static_cast<float>(preset.paperCropRight),
+                static_cast<float>(preset.paperCropBottom)
+            }
         };
     }
     m_ptzWidget->applyPresetStates(presetStates);
@@ -1523,18 +1606,30 @@ void MainWindow::onPreviewFormatChanged(const QString &formatId)
     updateVirtualCameraStreamerState();
 }
 
-void MainWindow::onPresetUpdated(int index, double pan, double tilt, double zoom, bool defined)
+void MainWindow::onPresetUpdated(int index)
 {
     auto settings = m_controller->getConfig().getSettings();
     if (index < 0 || index >= static_cast<int>(settings.presets.size())) {
         return;
     }
 
+    const auto uiPresets = m_ptzWidget->currentPresets();
+    const auto &ui = uiPresets[static_cast<size_t>(index)];
     auto &preset = settings.presets[static_cast<size_t>(index)];
-    preset.defined = defined;
-    preset.pan = pan;
-    preset.tilt = tilt;
-    preset.zoom = zoom;
+    preset.defined = ui.defined;
+    preset.pan = ui.pan;
+    preset.tilt = ui.tilt;
+    preset.zoom = ui.zoom;
+    preset.sceneDefined = ui.sceneDefined;
+    preset.trackingEnabled = ui.trackingEnabled;
+    preset.aiMode = ui.aiMode;
+    preset.aiSubMode = ui.aiSubMode;
+    preset.autoZoom = ui.autoZoom;
+    preset.paperCropMode = static_cast<int>(ui.paperCrop.mode);
+    preset.paperCropLeft = ui.paperCrop.left;
+    preset.paperCropTop = ui.paperCrop.top;
+    preset.paperCropRight = ui.paperCrop.right;
+    preset.paperCropBottom = ui.paperCrop.bottom;
 
     m_controller->getConfig().setSettings(settings);
     m_controller->saveConfig();
@@ -1911,6 +2006,25 @@ void MainWindow::onVideoEffectsChanged(const FilterPreviewWidget::VideoEffectsSe
     }
     m_previewWidget->setVideoEffects(settings);
     m_trackingWidget->setMirrored(settings.horizontalFlip);
+
+    const PaperCropSettings crop = settings.paperCrop.normalized();
+    auto configSettings = m_controller->getConfig().getSettings();
+    const PaperCropSettings savedCrop = {
+        static_cast<PaperCropMode>(configSettings.paperCropMode),
+        static_cast<float>(configSettings.paperCropLeft),
+        static_cast<float>(configSettings.paperCropTop),
+        static_cast<float>(configSettings.paperCropRight),
+        static_cast<float>(configSettings.paperCropBottom)
+    };
+    if (crop != savedCrop) {
+        configSettings.paperCropMode = static_cast<int>(crop.mode);
+        configSettings.paperCropLeft = crop.left;
+        configSettings.paperCropTop = crop.top;
+        configSettings.paperCropRight = crop.right;
+        configSettings.paperCropBottom = crop.bottom;
+        m_controller->getConfig().setSettings(configSettings);
+        m_controller->saveConfig();
+    }
 }
 
 void MainWindow::onSnapshotCaptured(const QImage &image)

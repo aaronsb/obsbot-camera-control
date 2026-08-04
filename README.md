@@ -83,11 +83,13 @@ The SDK also lists: Tiny (original), Tiny SE, Meet (original), Meet 4K, Me, Tail
 - CMake 3.16+
 - C++17 compiler (GCC/Clang)
 - OBSBOT SDK (included in `sdk/` directory)
+- OpenCV 4 (optional; enables automatic paper-boundary detection and perspective correction)
 
 ### Runtime Dependencies
 - Qt6 libraries
 - V4L2 (Video4Linux2) support
 - `lsof` for camera usage detection (optional but recommended)
+- OpenCV 4 is only required when automatic paper crop is desired; manual crop works without it
 
 ## Quick Start
 
@@ -263,13 +265,21 @@ When window is shown/restored:
 - Click "Show Camera Preview" again
 - Note: Controls work without preview!
 
-### Position Presets and Shortcuts
-1. Turn off auto-framing, then use **Tracking → Manual Camera Control** to frame the view.
-2. Include the desired zoom level—the saved zoom provides a repeatable crop around the paper or subject.
-3. Open **Presets** and save the position to slot 1, 2, or 3.
-4. Recall it with the slot's **Recall** button or `Ctrl+1`, `Ctrl+2`, or `Ctrl+3` while OBSBOT Control is active.
+### Scene Presets, Manual Positioning, and Paper Crop
 
-For a desktop-wide hotkey (including while another application is active), bind one of these commands in your desktop environment's keyboard-shortcut settings:
+Presets now save a complete scene: tracking/manual mode, AI mode, pan, tilt, zoom, and paper-crop settings.
+
+**Create a fixed table view:**
+1. In **Tracking**, check **Enable manual positioning (turns tracking off)**.
+2. Position and zoom the camera with the now-enabled manual controls.
+3. Enable the preview. In **Creative FX → Paper Crop**, choose **Manual rectangle** or **Automatic paper detection** and adjust the fallback crop sliders.
+4. In **Presets**, save this as the table scene.
+5. Re-enable tracking, configure the normal face view, disable paper crop, and save that as another scene.
+6. Recall scenes with their buttons or `Ctrl+1`, `Ctrl+2`, or `Ctrl+3`.
+
+For automatic framing in the **direct physical camera feed**, Tiny 2-family cameras can use **Use camera Desk mode for automatic paper framing**. Software paper detection and perspective correction affect the app preview, snapshots, and **OBSBOT Virtual Camera** output; conferencing software must select the virtual camera to receive that processed image.
+
+For a desktop-wide hotkey, bind:
 
 ```bash
 obsbot-cli --preset 1
@@ -277,9 +287,7 @@ obsbot-cli --preset 2
 obsbot-cli --preset 3
 ```
 
-Use `obsbot-cli --list-presets` to inspect saved slots. If multiple OBSBOT cameras are connected, add `--serial SERIAL` so a shortcut cannot target the wrong camera.
-
-Position presets store pan, tilt, and zoom. They do not detect paper edges. Tiny 2-family cameras can also try the camera's model-specific **Desk** tracking mode, but support and framing behavior vary by model and firmware.
+When the GUI is running, the CLI routes scene recall through it so tracking and software crop are restored too. Without the GUI, the CLI falls back to camera-side tracking/PTZ/zoom only. Use `obsbot-cli --list-presets` to inspect saved scenes. If multiple cameras are connected and the GUI is not running, add `--serial SERIAL`.
 
 ### Settings not saving
 - Check config directory exists: `~/.config/obsbot-control/`
@@ -304,8 +312,8 @@ See CLI help for available commands.
 Useful automation commands:
 
 ```bash
-obsbot-cli --list-presets              # Show saved position slots
-obsbot-cli --preset 1                  # Recall slot 1
+obsbot-cli --list-presets              # Show saved scenes
+obsbot-cli --preset 1                  # Recall scene 1
 obsbot-cli --preset 1 --serial ABC123  # Select an exact camera
 ```
 

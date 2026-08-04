@@ -3,9 +3,11 @@
 #include <string>
 #include <thread>
 #include <dev/devs.hpp>
+#include <QCoreApplication>
 #include "CameraSelection.h"
 #include "CliOptions.h"
 #include "Config.h"
+#include "GuiRemoteClient.h"
 #include "PresetCommand.h"
 
 using namespace std;
@@ -17,6 +19,7 @@ void runInteractiveMode(shared_ptr<Device> dev);
 
 int main(int argc, char **argv)
 {
+    QCoreApplication application(argc, argv);
     const CliParseResult parsed = parseCliOptions(argc, argv);
     if (!parsed.ok()) {
         cerr << "Error: " << parsed.error << "\n\n";
@@ -68,6 +71,22 @@ int main(int argc, char **argv)
         }
     }
 
+    if (action == CliAction::RecallPreset && parsed.options.serial.empty()) {
+        const GuiRemoteRecallResult remote = recallPresetViaRunningGui(parsed.options.presetNumber);
+        if (remote.status == GuiRemoteRecallResult::Status::Accepted) {
+            cout << "Scene preset " << parsed.options.presetNumber
+                 << " recalled through the running GUI." << endl;
+            return 0;
+        }
+        if (remote.status == GuiRemoteRecallResult::Status::Rejected
+            || remote.status == GuiRemoteRecallResult::Status::Error) {
+            cerr << (remote.message.empty() ? "The running GUI could not recall the preset."
+                                           : remote.message)
+                 << endl;
+            return 1;
+        }
+    }
+
     const auto dev = waitForSelectedCamera(
         parsed.options.serial,
         action == CliAction::RecallPreset,
@@ -93,7 +112,7 @@ int main(int argc, char **argv)
         if (!applyPresetToCamera(dev, *requestedPreset, cout, cerr)) {
             return 1;
         }
-        cout << "Position preset " << parsed.options.presetNumber << " recalled." << endl;
+        cout << "Scene preset " << parsed.options.presetNumber << " recalled." << endl;
     } else if (interactive) {
         runInteractiveMode(dev);
     } else {

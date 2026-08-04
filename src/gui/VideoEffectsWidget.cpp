@@ -1,6 +1,7 @@
 #include "VideoEffectsWidget.h"
 
 #include <QCheckBox>
+#include <QComboBox>
 #include <QColorDialog>
 #include <QFormLayout>
 #include <QGroupBox>
@@ -48,6 +49,13 @@ QWidget *createLabeledSlider(const QString &label, QSlider *slider)
 VideoEffectsWidget::VideoEffectsWidget(QWidget *parent)
     : QWidget(parent)
     , m_horizontalFlipCheckBox(nullptr)
+    , m_cropModeCombo(nullptr)
+    , m_cropMarginsContainer(nullptr)
+    , m_cropStatusLabel(nullptr)
+    , m_cropLeftSlider(nullptr)
+    , m_cropTopSlider(nullptr)
+    , m_cropRightSlider(nullptr)
+    , m_cropBottomSlider(nullptr)
     , m_shadowColorButton(nullptr)
     , m_highlightColorButton(nullptr)
 {
@@ -60,12 +68,64 @@ VideoEffectsWidget::VideoEffectsWidget(QWidget *parent)
     infoLabel->setStyleSheet("color: palette(mid); font-size: 11px;");
     rootLayout->addWidget(infoLabel);
 
-    auto addSlider = [&](QVBoxLayout *groupLayout, const QString &label, float min, float max, float initial, std::function<void(float)> setter) {
+    auto addSlider = [&](QVBoxLayout *groupLayout, const QString &label, float min, float max, float initial, std::function<void(float)> setter) -> QSlider * {
         QSlider *slider = createSlider(this);
         slider->setValue(sliderPositionForRange(initial, min, max));
         bindSlider(slider, min, max, std::move(setter), initial);
         groupLayout->addWidget(createLabeledSlider(label, slider));
+        return slider;
     };
+
+    // Paper/document crop
+    QGroupBox *cropGroup = new QGroupBox(tr("Paper Crop"));
+    QVBoxLayout *cropLayout = new QVBoxLayout(cropGroup);
+    cropLayout->setSpacing(6);
+
+    QWidget *modeRow = new QWidget(cropGroup);
+    QHBoxLayout *modeLayout = new QHBoxLayout(modeRow);
+    modeLayout->setContentsMargins(0, 0, 0, 0);
+    modeLayout->addWidget(new QLabel(tr("Mode"), modeRow));
+    m_cropModeCombo = new QComboBox(modeRow);
+    m_cropModeCombo->addItem(tr("Off"), static_cast<int>(PaperCropMode::Off));
+    m_cropModeCombo->addItem(tr("Manual rectangle"), static_cast<int>(PaperCropMode::Manual));
+    m_cropModeCombo->addItem(tr("Automatic paper detection"), static_cast<int>(PaperCropMode::Automatic));
+    modeLayout->addWidget(m_cropModeCombo, 1);
+    cropLayout->addWidget(modeRow);
+
+    m_cropStatusLabel = new QLabel(cropGroup);
+    m_cropStatusLabel->setWordWrap(true);
+    m_cropStatusLabel->setStyleSheet("color: palette(mid); font-size: 11px;");
+    cropLayout->addWidget(m_cropStatusLabel);
+
+    m_cropMarginsContainer = new QWidget(cropGroup);
+    QVBoxLayout *marginLayout = new QVBoxLayout(m_cropMarginsContainer);
+    marginLayout->setContentsMargins(0, 0, 0, 0);
+    marginLayout->setSpacing(6);
+    m_cropLeftSlider = addSlider(marginLayout, tr("Crop left"), 0.0f, 0.45f, m_settings.paperCrop.left, [this](float value) {
+        m_settings.paperCrop.left = value;
+        emitSettingsChanged();
+    });
+    m_cropTopSlider = addSlider(marginLayout, tr("Crop top"), 0.0f, 0.45f, m_settings.paperCrop.top, [this](float value) {
+        m_settings.paperCrop.top = value;
+        emitSettingsChanged();
+    });
+    m_cropRightSlider = addSlider(marginLayout, tr("Crop right"), 0.0f, 0.45f, m_settings.paperCrop.right, [this](float value) {
+        m_settings.paperCrop.right = value;
+        emitSettingsChanged();
+    });
+    m_cropBottomSlider = addSlider(marginLayout, tr("Crop bottom"), 0.0f, 0.45f, m_settings.paperCrop.bottom, [this](float value) {
+        m_settings.paperCrop.bottom = value;
+        emitSettingsChanged();
+    });
+    cropLayout->addWidget(m_cropMarginsContainer);
+
+    connect(m_cropModeCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int) {
+        m_settings.paperCrop.mode = static_cast<PaperCropMode>(m_cropModeCombo->currentData().toInt());
+        updateCropControls();
+        emitSettingsChanged();
+    });
+    rootLayout->addWidget(cropGroup);
+    updateCropControls();
 
     // Tone adjustments
     QGroupBox *toneGroup = new QGroupBox(tr("Tone"));
@@ -251,9 +311,21 @@ void VideoEffectsWidget::applySettings(const FilterPreviewWidget::VideoEffectsSe
             syncSlider(group, tr("Glow"), 0.0f, 1.0f, m_settings.glow);
             syncSlider(group, tr("Bloom"), 0.0f, 1.0f, m_settings.bloom);
             syncSlider(group, tr("Soft Focus"), 0.0f, 1.0f, m_settings.softFocus);
+        } else if (group->title() == tr("Paper Crop")) {
+            syncSlider(group, tr("Crop left"), 0.0f, 0.45f, m_settings.paperCrop.left);
+            syncSlider(group, tr("Crop top"), 0.0f, 0.45f, m_settings.paperCrop.top);
+            syncSlider(group, tr("Crop right"), 0.0f, 0.45f, m_settings.paperCrop.right);
+            syncSlider(group, tr("Crop bottom"), 0.0f, 0.45f, m_settings.paperCrop.bottom);
         }
     }
 
+    if (m_cropModeCombo) {
+        m_cropModeCombo->blockSignals(true);
+        const int index = m_cropModeCombo->findData(static_cast<int>(m_settings.paperCrop.mode));
+        m_cropModeCombo->setCurrentIndex(index >= 0 ? index : 0);
+        m_cropModeCombo->blockSignals(false);
+        updateCropControls();
+    }
     if (m_horizontalFlipCheckBox) {
         m_horizontalFlipCheckBox->blockSignals(true);
         m_horizontalFlipCheckBox->setChecked(m_settings.horizontalFlip);
@@ -295,6 +367,27 @@ void VideoEffectsWidget::updateColorButton(QPushButton *button, const QColor &co
 {
     const QString css = QStringLiteral("background-color: %1; color: %2;").arg(color.name(), color.lightness() > 128 ? "#111" : "#f0f0f0");
     button->setStyleSheet(css);
+}
+
+void VideoEffectsWidget::updateCropControls()
+{
+    if (!m_cropModeCombo || !m_cropMarginsContainer || !m_cropStatusLabel) {
+        return;
+    }
+
+    const auto mode = static_cast<PaperCropMode>(m_cropModeCombo->currentData().toInt());
+    m_cropMarginsContainer->setEnabled(mode != PaperCropMode::Off);
+    if (mode == PaperCropMode::Automatic) {
+        if (FilterPreviewWidget::automaticPaperCropAvailable()) {
+            m_cropStatusLabel->setText(tr("Detects the paper boundary and corrects perspective. The sliders are used as a fallback when detection is uncertain."));
+        } else {
+            m_cropStatusLabel->setText(tr("Automatic detection is unavailable in this build; the manual rectangle fallback will be used."));
+        }
+    } else if (mode == PaperCropMode::Manual) {
+        m_cropStatusLabel->setText(tr("Crops the preview, snapshots, and virtual-camera output to the saved rectangle."));
+    } else {
+        m_cropStatusLabel->setText(tr("Software crop is disabled."));
+    }
 }
 
 void VideoEffectsWidget::emitSettingsChanged()

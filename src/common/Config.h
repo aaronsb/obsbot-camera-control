@@ -36,6 +36,16 @@ public:
             double pan;
             double tilt;
             double zoom;
+            bool sceneDefined;
+            bool trackingEnabled;
+            int aiMode;
+            int aiSubMode;
+            bool autoZoom;
+            int paperCropMode;
+            double paperCropLeft;
+            double paperCropTop;
+            double paperCropRight;
+            double paperCropBottom;
         };
 
         bool faceTracking;
@@ -69,6 +79,11 @@ public:
 
         // Preview / video
         std::string previewFormat; // Encoded as "widthxheight@fps" or "auto"
+        int paperCropMode;         // 0=Off, 1=Manual, 2=Automatic
+        double paperCropLeft;      // Normalized margin, 0.0-0.45
+        double paperCropTop;
+        double paperCropRight;
+        double paperCropBottom;
 
         std::array<PresetSlot, 3> presets;
 

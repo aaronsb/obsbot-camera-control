@@ -31,16 +31,32 @@ std::string validConfigWithPreset(const std::string &pan,
         "saturation=128\n"
         "white_balance=auto\n"
         "start_minimized=disabled\n"
+        "paper_crop_mode=automatic\n"
+        "paper_crop_left=0.10\n"
+        "paper_crop_top=0.05\n"
+        "paper_crop_right=0.10\n"
+        "paper_crop_bottom=0.05\n"
         "preset1_defined=enabled\n"
         "preset1_pan=" + pan + "\n"
         "preset1_tilt=" + tilt + "\n"
-        "preset1_zoom=" + zoom + "\n";
+        "preset1_zoom=" + zoom + "\n"
+        "preset1_scene_defined=enabled\n"
+        "preset1_tracking_enabled=disabled\n"
+        "preset1_ai_mode=0\n"
+        "preset1_ai_sub_mode=0\n"
+        "preset1_auto_zoom=disabled\n"
+        "preset1_paper_crop_mode=manual\n"
+        "preset1_paper_crop_left=0.15\n"
+        "preset1_paper_crop_top=0.10\n"
+        "preset1_paper_crop_right=0.15\n"
+        "preset1_paper_crop_bottom=0.10\n";
 }
 
 bool loadConfig(const std::filesystem::path &configPath,
                 const std::string &pan,
                 const std::string &tilt,
-                const std::string &zoom)
+                const std::string &zoom,
+                Config::CameraSettings *loadedSettings = nullptr)
 {
     std::ofstream file(configPath);
     file << validConfigWithPreset(pan, tilt, zoom);
@@ -48,7 +64,11 @@ bool loadConfig(const std::filesystem::path &configPath,
 
     Config config;
     std::vector<Config::ValidationError> errors;
-    return config.load(errors);
+    const bool loaded = config.load(errors);
+    if (loaded && loadedSettings) {
+        *loadedSettings = config.getSettings();
+    }
+    return loaded;
 }
 
 bool check(bool condition, const char *message)
@@ -78,8 +98,15 @@ int main()
     setenv("XDG_CONFIG_HOME", root.c_str(), 1);
 
     bool passed = true;
-    passed &= check(loadConfig(configPath, "0.25", "-0.5", "1.75"),
-                    "finite preset values are accepted");
+    Config::CameraSettings loadedSettings{};
+    passed &= check(loadConfig(configPath, "0.25", "-0.5", "1.75", &loadedSettings),
+                    "finite scene preset and crop values are accepted");
+    passed &= check(loadedSettings.paperCropMode == 2,
+                    "automatic global crop mode is parsed");
+    passed &= check(loadedSettings.presets[0].sceneDefined
+                    && !loadedSettings.presets[0].trackingEnabled
+                    && loadedSettings.presets[0].paperCropMode == 1,
+                    "manual scene state is parsed");
     passed &= check(!loadConfig(configPath, "nan", "-0.5", "1.75"),
                     "NaN preset pan is rejected");
     passed &= check(!loadConfig(configPath, "0.25", "inf", "1.75"),

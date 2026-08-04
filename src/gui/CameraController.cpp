@@ -260,15 +260,28 @@ bool CameraController::hasTiny2Capabilities() const
     return isTiny2Family();
 }
 
+bool CameraController::enterAutoFramingMediaMode()
+{
+    if (!m_connected || m_v4l2Only) return false;
+
+    const bool success = executeCommand("Set MediaMode to AutoFrame", [this]() {
+        return m_device->cameraSetMediaModeU(Device::MediaModeAutoFrame);
+    });
+    if (success) {
+        setFocusAbsolute(0, true);
+        m_currentState.autoFramingEnabled = true;
+        emit stateChanged(m_currentState);
+    }
+    return success;
+}
+
 bool CameraController::enableAutoFraming(bool enabled)
 {
     if (!m_connected || m_v4l2Only) return false;
 
     if (enabled) {
         // Step 1: Set MediaMode to AutoFrame
-        if (!executeCommand("Set MediaMode to AutoFrame", [this]() {
-            return m_device->cameraSetMediaModeU(Device::MediaModeAutoFrame);
-        })) {
+        if (!enterAutoFramingMediaMode()) {
             return false;
         }
 
@@ -279,11 +292,6 @@ bool CameraController::enableAutoFraming(bool enabled)
             });
         });
 
-        // Restore auto focus when auto-framing is enabled
-        setFocusAbsolute(0, true);
-
-        m_currentState.autoFramingEnabled = true;
-        emit stateChanged(m_currentState);
         return true;  // First command succeeded, second is pending
     } else {
         bool success = executeCommand("Disable AutoFraming", [this]() {

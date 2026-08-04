@@ -34,12 +34,16 @@ class VirtualCameraStreamer;
 class MainWindow : public QMainWindow
 {
     Q_OBJECT
+    Q_CLASSINFO("D-Bus Interface", "com.obsbot.CameraControl")
 
 public:
     explicit MainWindow(QWidget *parent = nullptr);
     ~MainWindow();
 
     bool isStartingMinimized() const;
+
+public slots:
+    Q_SCRIPTABLE bool recallPreset(int presetNumber);
 
 private slots:
     void onCameraSelectorChanged(int index);
@@ -54,7 +58,7 @@ private slots:
     void onPreviewStarted();
     void onPreviewFailed(const QString &error);
     void onPreviewFormatChanged(const QString &formatId);
-    void onPresetUpdated(int index, double pan, double tilt, double zoom, bool defined);
+    void onPresetUpdated(int index);
     void onTrayIconActivated(QSystemTrayIcon::ActivationReason reason);
     void onShowHideAction();
     void onQuitAction();
@@ -152,6 +156,8 @@ private:
     bool m_isApplyingStyle;
     bool m_virtualCameraErrorNotified;
     bool m_virtualCameraAvailable;
+    bool m_dbusRegistered {false};
+    int m_pendingRemotePreset {-1};
 
 protected:
     bool event(QEvent *event) override;

@@ -52,12 +52,27 @@ void Config::setDefaults()
 
     // Video / preview
     m_settings.previewFormat = "auto";
+    m_settings.paperCropMode = 0;
+    m_settings.paperCropLeft = 0.0;
+    m_settings.paperCropTop = 0.0;
+    m_settings.paperCropRight = 0.0;
+    m_settings.paperCropBottom = 0.0;
 
     for (auto &preset : m_settings.presets) {
         preset.defined = false;
         preset.pan = 0.0;
         preset.tilt = 0.0;
         preset.zoom = 1.0;
+        preset.sceneDefined = false;
+        preset.trackingEnabled = false;
+        preset.aiMode = 0;
+        preset.aiSubMode = 0;
+        preset.autoZoom = false;
+        preset.paperCropMode = 0;
+        preset.paperCropLeft = 0.0;
+        preset.paperCropTop = 0.0;
+        preset.paperCropRight = 0.0;
+        preset.paperCropBottom = 0.0;
     }
 
     // Application settings
@@ -186,6 +201,11 @@ bool Config::load(std::vector<ValidationError> &errors)
         "track_speed",
         "audio_auto_gain",
         "preview_format",
+        "paper_crop_mode",
+        "paper_crop_left",
+        "paper_crop_top",
+        "paper_crop_right",
+        "paper_crop_bottom",
         "virtual_camera_enabled",
         "virtual_camera_device",
         "virtual_camera_resolution",
@@ -213,7 +233,17 @@ bool Config::load(std::vector<ValidationError> &errors)
             "defined",
             "pan",
             "tilt",
-            "zoom"
+            "zoom",
+            "scene_defined",
+            "tracking_enabled",
+            "ai_mode",
+            "ai_sub_mode",
+            "auto_zoom",
+            "paper_crop_mode",
+            "paper_crop_left",
+            "paper_crop_top",
+            "paper_crop_right",
+            "paper_crop_bottom"
         };
         return presetSuffixes.count(suffix) > 0;
     };
@@ -275,6 +305,28 @@ bool Config::parseLine(const std::string &line, int lineNumber, std::vector<Vali
         }
     };
 
+    auto parseInteger = [](const std::string &val, int &out) -> bool {
+        try {
+            size_t consumed = 0;
+            out = std::stoi(val, &consumed);
+            return consumed == val.size();
+        } catch (...) {
+            return false;
+        }
+    };
+
+    auto parseCropMode = [&](const std::string &val, int &out) -> bool {
+        if (val == "off") out = 0;
+        else if (val == "manual") out = 1;
+        else if (val == "automatic" || val == "auto") out = 2;
+        else if (!parseInteger(val, out)) return false;
+        return out >= 0 && out <= 2;
+    };
+
+    auto parseCropMargin = [&](const std::string &val, double &out) -> bool {
+        return parseFiniteDouble(val, out) && out >= 0.0 && out <= 0.45;
+    };
+
     for (int i = 0; i < 3; ++i) {
         std::string base = "preset" + std::to_string(i + 1) + "_";
         if (key.rfind(base, 0) == 0) {
@@ -322,6 +374,66 @@ bool Config::parseLine(const std::string &line, int lineNumber, std::vector<Vali
                     return false;
                 }
                 preset.zoom = zoom;
+                return true;
+            } else if (suffix == "scene_defined") {
+                if (!parseBool(value, preset.sceneDefined)) {
+                    addError(InvalidValue, base + "scene_defined must be true/false or enabled/disabled");
+                    return false;
+                }
+                return true;
+            } else if (suffix == "tracking_enabled") {
+                if (!parseBool(value, preset.trackingEnabled)) {
+                    addError(InvalidValue, base + "tracking_enabled must be true/false or enabled/disabled");
+                    return false;
+                }
+                return true;
+            } else if (suffix == "ai_mode") {
+                if (!parseInteger(value, preset.aiMode) || preset.aiMode < 0 || preset.aiMode > 5) {
+                    addError(InvalidValue, base + "ai_mode must be between 0 and 5");
+                    return false;
+                }
+                return true;
+            } else if (suffix == "ai_sub_mode") {
+                if (!parseInteger(value, preset.aiSubMode) || preset.aiSubMode < 0 || preset.aiSubMode > 5) {
+                    addError(InvalidValue, base + "ai_sub_mode must be between 0 and 5");
+                    return false;
+                }
+                return true;
+            } else if (suffix == "auto_zoom") {
+                if (!parseBool(value, preset.autoZoom)) {
+                    addError(InvalidValue, base + "auto_zoom must be true/false or enabled/disabled");
+                    return false;
+                }
+                return true;
+            } else if (suffix == "paper_crop_mode") {
+                if (!parseCropMode(value, preset.paperCropMode)) {
+                    addError(InvalidValue, base + "paper_crop_mode must be off/manual/automatic or 0/1/2");
+                    return false;
+                }
+                return true;
+            } else if (suffix == "paper_crop_left") {
+                if (!parseCropMargin(value, preset.paperCropLeft)) {
+                    addError(InvalidValue, base + "paper_crop_left must be between 0.0 and 0.45");
+                    return false;
+                }
+                return true;
+            } else if (suffix == "paper_crop_top") {
+                if (!parseCropMargin(value, preset.paperCropTop)) {
+                    addError(InvalidValue, base + "paper_crop_top must be between 0.0 and 0.45");
+                    return false;
+                }
+                return true;
+            } else if (suffix == "paper_crop_right") {
+                if (!parseCropMargin(value, preset.paperCropRight)) {
+                    addError(InvalidValue, base + "paper_crop_right must be between 0.0 and 0.45");
+                    return false;
+                }
+                return true;
+            } else if (suffix == "paper_crop_bottom") {
+                if (!parseCropMargin(value, preset.paperCropBottom)) {
+                    addError(InvalidValue, base + "paper_crop_bottom must be between 0.0 and 0.45");
+                    return false;
+                }
                 return true;
             }
         }
@@ -558,6 +670,31 @@ bool Config::parseLine(const std::string &line, int lineNumber, std::vector<Vali
         }
     } else if (key == "preview_format") {
         m_settings.previewFormat = value;
+    } else if (key == "paper_crop_mode") {
+        if (!parseCropMode(value, m_settings.paperCropMode)) {
+            addError(InvalidValue, "paper_crop_mode must be off/manual/automatic or 0/1/2");
+            return false;
+        }
+    } else if (key == "paper_crop_left") {
+        if (!parseCropMargin(value, m_settings.paperCropLeft)) {
+            addError(InvalidValue, "paper_crop_left must be between 0.0 and 0.45");
+            return false;
+        }
+    } else if (key == "paper_crop_top") {
+        if (!parseCropMargin(value, m_settings.paperCropTop)) {
+            addError(InvalidValue, "paper_crop_top must be between 0.0 and 0.45");
+            return false;
+        }
+    } else if (key == "paper_crop_right") {
+        if (!parseCropMargin(value, m_settings.paperCropRight)) {
+            addError(InvalidValue, "paper_crop_right must be between 0.0 and 0.45");
+            return false;
+        }
+    } else if (key == "paper_crop_bottom") {
+        if (!parseCropMargin(value, m_settings.paperCropBottom)) {
+            addError(InvalidValue, "paper_crop_bottom must be between 0.0 and 0.45");
+            return false;
+        }
     } else if (key == "start_minimized") {
         if (!parseBool(value, m_settings.startMinimized)) {
             addError(InvalidValue, "start_minimized must be true/false or enabled/disabled");
@@ -819,6 +956,16 @@ bool Config::save()
         file << "preset" << (i + 1) << "_pan=" << preset.pan << "\n";
         file << "preset" << (i + 1) << "_tilt=" << preset.tilt << "\n";
         file << "preset" << (i + 1) << "_zoom=" << preset.zoom << "\n\n";
+        file << "preset" << (i + 1) << "_scene_defined=" << (preset.sceneDefined ? "enabled" : "disabled") << "\n";
+        file << "preset" << (i + 1) << "_tracking_enabled=" << (preset.trackingEnabled ? "enabled" : "disabled") << "\n";
+        file << "preset" << (i + 1) << "_ai_mode=" << preset.aiMode << "\n";
+        file << "preset" << (i + 1) << "_ai_sub_mode=" << preset.aiSubMode << "\n";
+        file << "preset" << (i + 1) << "_auto_zoom=" << (preset.autoZoom ? "enabled" : "disabled") << "\n";
+        file << "preset" << (i + 1) << "_paper_crop_mode=" << preset.paperCropMode << "\n";
+        file << "preset" << (i + 1) << "_paper_crop_left=" << preset.paperCropLeft << "\n";
+        file << "preset" << (i + 1) << "_paper_crop_top=" << preset.paperCropTop << "\n";
+        file << "preset" << (i + 1) << "_paper_crop_right=" << preset.paperCropRight << "\n";
+        file << "preset" << (i + 1) << "_paper_crop_bottom=" << preset.paperCropBottom << "\n\n";
     }
 
     file << "# Audio auto gain control\n";
@@ -826,6 +973,12 @@ bool Config::save()
 
     file << "# Preferred preview format (auto or WIDTHxHEIGHT@FPS)\n";
     file << "preview_format=" << (m_settings.previewFormat.empty() ? "auto" : m_settings.previewFormat) << "\n\n";
+    file << "# Paper crop (0=Off, 1=Manual rectangle, 2=Automatic detection)\n";
+    file << "paper_crop_mode=" << m_settings.paperCropMode << "\n";
+    file << "paper_crop_left=" << m_settings.paperCropLeft << "\n";
+    file << "paper_crop_top=" << m_settings.paperCropTop << "\n";
+    file << "paper_crop_right=" << m_settings.paperCropRight << "\n";
+    file << "paper_crop_bottom=" << m_settings.paperCropBottom << "\n\n";
 
     file << "# Application Settings\n";
     file << "# Start application minimized to system tray\n";

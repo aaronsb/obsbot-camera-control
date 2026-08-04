@@ -1465,7 +1465,9 @@ void MainWindow::onCameraConnected(const CameraController::CameraInfo &info)
                 // ownership plus the global profile for that mode. It never
                 // pushes the prior camera's PTZ/image state, and the adopted
                 // intent is persisted so reconnect cannot reverse the switch.
-                auto settings = m_controller->getConfig().getSettings();
+                const auto previousSettings =
+                    m_controller->getConfig().getSettings();
+                auto settings = previousSettings;
                 const bool tiny2 = m_controller->hasTiny2Capabilities();
                 const bool stableTiny2Mode = state.aiMode
                         >= Device::AiWorkModeNone
@@ -1536,14 +1538,25 @@ void MainWindow::onCameraConnected(const CameraController::CameraInfo &info)
                         state.audioAutoGainEnabled;
                 }
                 m_controller->getConfig().setSettings(settings);
-                m_controller->saveConfig();
+                if (!m_controller->saveConfig()) {
+                    m_controller->getConfig().setSettings(previousSettings);
+                    if (m_statusLabel) {
+                        m_statusLabel->setText(tr(
+                            "Selected camera retained its current state: adopted intent could not be saved."));
+                    }
+                    qWarning() << "MainWindow: selected-camera intent was not "
+                                  "applied because persistence failed";
+                    return;
+                }
                 m_trackingWidget->applyTrackingState(selectedTracking);
             } else {
                 // V4L2 cannot prove AI ownership or expose all camera state.
                 // Persist a safe off intent and invalidate every camera-bound
                 // category so a later SDK reconnect cannot apply the prior
                 // camera's movement or image values.
-                auto settings = m_controller->getConfig().getSettings();
+                const auto previousSettings =
+                    m_controller->getConfig().getSettings();
+                auto settings = previousSettings;
                 const TrackingIntentState safeOff{
                     false,
                     Device::AiWorkModeNone,
@@ -1560,7 +1573,16 @@ void MainWindow::onCameraConnected(const CameraController::CameraInfo &info)
                 settings.zoomIntentDefined = false;
                 settings.imageIntentDefined = false;
                 m_controller->getConfig().setSettings(settings);
-                m_controller->saveConfig();
+                if (!m_controller->saveConfig()) {
+                    m_controller->getConfig().setSettings(previousSettings);
+                    if (m_statusLabel) {
+                        m_statusLabel->setText(tr(
+                            "Selected V4L2 camera safe intent could not be saved."));
+                    }
+                    qWarning() << "MainWindow: selected V4L2 safe intent "
+                                  "persistence failed";
+                    return;
+                }
                 m_trackingWidget->setTrackingStatePresentation(safeOff);
             }
         } else if (initialApplicationWasPending) {
@@ -1845,9 +1867,20 @@ bool MainWindow::enforceAutomaticPaperCropTrackingPolicy()
             current,
             settings.trackingModeProfiles);
     if (effective != current) {
+        const auto previousSettings = settings;
         storeTrackingIntent(settings, effective, false);
         m_controller->getConfig().setSettings(settings);
-        m_controller->saveConfig();
+        if (!m_controller->saveConfig()) {
+            m_controller->getConfig().setSettings(previousSettings);
+            m_trackingWidget->setTrackingStatePresentation(current);
+            if (m_statusLabel) {
+                m_statusLabel->setText(tr(
+                    "Could not persist Automatic crop Desk mode; previous tracking retained."));
+            }
+            qWarning() << "MainWindow: Automatic crop Desk persistence "
+                          "failed; camera transition cancelled";
+            return false;
+        }
     }
     m_trackingWidget->setTrackingStatePresentation(effective);
     return true;
@@ -2303,15 +2336,61 @@ void MainWindow::onCameraSelectorChanged(int index)
         return;
     }
 
-    // Stage the exact target synchronously. Any D-Bus recall, reconnect,
-    // minimize, or tray transition during the release delay will therefore
-    // reconnect to this selection rather than the previous camera.
+    const QString previousDevicePath = m_controller->selectedDevicePath();
+    const QString previousSerial = m_controller->selectedDeviceSerial();
+    const auto previousSettings =
+        m_controller->getConfig().getSettings();
+    auto safeSettings = previousSettings;
+    const TrackingIntentState safeSwitchIntent{
+        false,
+        Device::AiWorkModeNone,
+        0,
+        {
+            TrackingFocusPolicy::Manual,
+            50,
+            false,
+            safeSettings.activeTrackingProfile.trackSpeed
+        }
+    };
+    storeTrackingIntent(safeSettings, safeSwitchIntent, false);
+    safeSettings.panTiltIntentDefined = false;
+    safeSettings.zoomIntentDefined = false;
+    safeSettings.imageIntentDefined = false;
+    m_controller->getConfig().setSettings(safeSettings);
+    if (!m_controller->saveConfig()) {
+        m_controller->getConfig().setSettings(previousSettings);
+        for (int previousIndex = 0;
+             previousIndex < m_detectedCameras.size(); ++previousIndex) {
+            const auto &candidate = m_detectedCameras[previousIndex];
+            const bool serialMatches = !previousSerial.isEmpty()
+                && candidate.serial == previousSerial;
+            const bool pathMatches = previousSerial.isEmpty()
+                && candidate.devicePath == previousDevicePath;
+            if (serialMatches || pathMatches) {
+                const bool wasBlocked =
+                    m_cameraSelectorCombo->blockSignals(true);
+                m_cameraSelectorCombo->setCurrentIndex(previousIndex);
+                m_cameraSelectorCombo->blockSignals(wasBlocked);
+                break;
+            }
+        }
+        if (m_statusLabel) {
+            m_statusLabel->setText(tr(
+                "Camera switch cancelled: safe intent could not be saved."));
+        }
+        qWarning() << "MainWindow: camera switch cancelled because safe "
+                      "intent persistence failed";
+        return;
+    }
+
+    // Stage the exact target only after the prior camera's movement/image
+    // intent has been durably invalidated. Any D-Bus recall, reconnect, or
+    // tray transition during the release delay is therefore fail-closed.
     m_controller->selectCameraTarget(cam.devicePath, cam.serial);
 
     if (m_previewToggleButton->isChecked()) {
         m_previewToggleButton->setChecked(false);
     }
-
     m_previewWidget->setCameraDeviceId(cam.devicePath);
 
     // Brief delay after disconnect so the SDK releases the previous device
@@ -2321,28 +2400,6 @@ void MainWindow::onCameraSelectorChanged(int index)
     const QString devicePath = cam.devicePath;
     const QString serialNumber = cam.serial;
     const quint64 switchGeneration = ++m_cameraSwitchGeneration;
-
-    // Invalidate prior-camera intent before any asynchronous release/connect
-    // window. If the switch is interrupted, every subsequent reconnect still
-    // sees a safe tracking-off state with no old movement/image categories.
-    auto settings = m_controller->getConfig().getSettings();
-    const TrackingIntentState safeSwitchIntent{
-        false,
-        Device::AiWorkModeNone,
-        0,
-        {
-            TrackingFocusPolicy::Manual,
-            50,
-            false,
-            settings.activeTrackingProfile.trackSpeed
-        }
-    };
-    storeTrackingIntent(settings, safeSwitchIntent, false);
-    settings.panTiltIntentDefined = false;
-    settings.zoomIntentDefined = false;
-    settings.imageIntentDefined = false;
-    m_controller->getConfig().setSettings(settings);
-    m_controller->saveConfig();
 
     m_controller->disconnectFromCamera();
     // disconnectFromCamera() emits cameraDisconnected synchronously; arm the

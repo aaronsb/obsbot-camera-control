@@ -1,5 +1,5 @@
 ---
-commands: publish-aur|build\.sh|makepkg
+commands: build\.sh|makepkg|make package
 files: PKGBUILD|\.SRCINFO$
 keywords: release|version bump|publish|aur
 ---
@@ -20,22 +20,28 @@ Binary lands in `./bin/obsbot-gui` (build) or `~/.local/bin/obsbot-gui` (install
 Before bumping version:
 1. All changes committed, build tested: `./build.sh build --confirm`
 2. Binary tested: `./bin/obsbot-gui`
-3. Update `pkgver` in PKGBUILD (reset `pkgrel` to 1)
-4. Regenerate: `makepkg --printsrcinfo > .SRCINFO`
-5. Commit PKGBUILD + .SRCINFO
-6. Tag: `git tag -a vX.Y.Z -m "Release X.Y.Z"`
-7. Push tag AND commits — tag must exist on GitHub before AUR publish
+3. Check the recipe: `make package` — clean chroot build plus namcap, and it
+   fails on a namcap error rather than printing one
+4. Tag: `git tag -a vX.Y.Z -m "Release X.Y.Z"`
+5. Push the tag AND the commits
+6. Cut the GitHub release: `gh release create vX.Y.Z --generate-notes`
 
-## AUR Publishing
+Do NOT touch `pkgver`, `pkgrel` or `sha256sums`, and do not commit a `.SRCINFO`.
+arch-repo overwrites all four.
 
-Preferred: `./publish-aur.sh` (handles tag verification, .SRCINFO regen, AUR push)
+## Publishing
 
-Critical details:
-- AUR uses `master` branch, main repo uses `main`
-- AUR git: `ssh://aur@aur.archlinux.org/obsbot-camera-control.git`
-- Only PKGBUILD and .SRCINFO go to AUR
-- Tag version MUST match `pkgver` — PKGBUILD sources from `#tag=v${pkgver}`
-- If tag doesn't exist or isn't pushed, AUR users can't install
+Nothing to do. aaronsb/arch-repo watches this repository, reads `./PKGBUILD`
+from the default branch, takes the version from the newest published release,
+builds it in a clean container, lints it, signs it, and pushes to the AUR and
+the `[aaronsb]` pacman repository.
+
+- Never push to the AUR from here. Two writers to one ref is how a PKGBUILD and
+  its `.SRCINFO` drift apart.
+- The tag must exist and be pushed before the release is cut — the recipe
+  sources from `#tag=v${pkgver}`.
+- A packaging fix needs no release: change the recipe on the default branch and
+  arch-repo ships it as a `pkgrel` bump.
 
 ## Version Scheme
 

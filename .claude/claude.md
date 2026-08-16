@@ -27,7 +27,6 @@ obsbot-camera-control/
 ├── PKGBUILD              # Arch Linux package definition
 ├── .SRCINFO              # AUR package metadata (auto-generated)
 ├── build.sh              # Build automation script
-├── publish-aur.sh        # AUR publishing automation
 └── local-install.sh      # Developer installation script
 ```
 
@@ -92,31 +91,29 @@ The code detects camera models and shows/hides controls accordingly:
 
 ### Version Numbering
 - Follow semantic versioning: MAJOR.MINOR.PATCH
-- Update `pkgver` in PKGBUILD
-- Increment `pkgrel` for packaging-only changes (reset to 1 when pkgver changes)
+- Do NOT edit `pkgver`, `pkgrel` or `sha256sums`. aaronsb/arch-repo overwrites
+  all three: `pkgver` from the newest published release, `pkgrel` with its own
+  count of how many times it has packaged that release. They are placeholders.
 
 ### Publishing a New Version
 
-**Option 1: Using the publish-aur.sh script (Recommended)**
+arch-repo publishes this package. Tag and cut a GitHub release; it does the rest.
 
 ```bash
-# 1. Update version in PKGBUILD
-vim PKGBUILD  # Change pkgver=X.Y.Z
+# 1. Check the recipe still builds and lints before you tag
+make package        # clean chroot + namcap, fails on a namcap error
 
-# 2. Commit version bump
-git add PKGBUILD
-git commit -m "Bump version to X.Y.Z"
-
-# 3. Run publish script (it handles everything)
-./publish-aur.sh
-
-# The script will:
-# - Check for uncommitted changes
-# - Verify/create/push git tag vX.Y.Z
-# - Regenerate .SRCINFO
-# - Update AUR repository
-# - Prompt for confirmation before pushing
+# 2. Tag and release
+git tag -a vX.Y.Z -m "vX.Y.Z" && git push origin vX.Y.Z
+gh release create vX.Y.Z --generate-notes
 ```
+
+arch-repo reads ./PKGBUILD from the default branch, takes the version from the
+release, builds in a clean container, lints, signs, and pushes to the AUR and
+the [aaronsb] pacman repository.
+
+A packaging fix needs no release at all: change the recipe on the default
+branch and arch-repo ships it as a pkgrel bump.
 
 **Option 2: Manual process**
 
@@ -262,6 +259,6 @@ When working on this project:
 1. **Respect the architecture**: PTZ controls live in TrackingControlWidget, not PTZControlWidget
 2. **Check camera capabilities**: Code has branching for Meet 2 vs Tiny 2 family
 3. **Build before committing**: Always run `./build.sh build --confirm`
-4. **Version updates**: Use `publish-aur.sh` script for releases
-5. **Tag management**: Tags must exist and be pushed before AUR publishing
-6. **AUR branch**: AUR uses `master` branch, main repo uses `main`
+4. **Version updates**: tag and cut a GitHub release; arch-repo publishes
+5. **Tag management**: tags must exist and be pushed before a release is cut
+6. **AUR**: not touched from here — arch-repo is the only writer

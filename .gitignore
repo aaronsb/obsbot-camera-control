@@ -56,3 +56,6 @@ Makefile
 
 # Logs
 *.log
+
+# make package dry run
+/pkgbuild-check/

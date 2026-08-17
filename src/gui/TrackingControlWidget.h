@@ -14,6 +14,8 @@
 #include "CameraController.h"
 #include "XYPad.h"
 
+struct TrackingControlWidgetTestAccess;
+
 /**
  * @brief Widget for camera tracking control (automatic or manual PTZ)
  * Contains auto-framing toggle and manual PTZ controls (mutually exclusive)
@@ -27,12 +29,30 @@ public:
 
     void updateFromState(const CameraController::CameraState &state);
     void setV4l2Mode(bool v4l2Only);
+    using TrackingState = TrackingIntentState;
+    struct TrackingApplyResult {
+        bool accepted = false;
+        bool confirmationPending = false;
+        quint64 intentGeneration = 0;
+    };
+
     bool isTrackingEnabled() const { return m_trackingCheckBox->isChecked(); }
-    void setTrackingEnabled(bool enabled) {
-        m_trackingCheckBox->blockSignals(true);
-        m_trackingCheckBox->setChecked(enabled);
-        m_trackingCheckBox->blockSignals(false);
+    bool isManualControlEnabled() const;
+    TrackingState trackingState() const;
+    bool matchesTrackingState(const TrackingState &expected) const;
+    void setTrackingEnabled(bool enabled);
+    TrackingApplyResult applyTrackingState(const TrackingState &state);
+    void setTrackingStatePresentation(const TrackingState &state);
+    void setModeProfiles(const Tiny2TrackingModeProfiles &profiles);
+    const Tiny2TrackingModeProfiles &modeProfiles() const {
+        return m_modeProfiles;
     }
+    TrackingModeProfile modeProfile(int aiMode) const;
+    TrackingState trackingStateForMode(int aiMode) const;
+    void setActiveTrackingProfile(const TrackingModeProfile &profile);
+    TrackingModeProfile activeTrackingProfile() const;
+    void setManualFocusPosition(int position);
+    bool hasTiny2Capabilities() const { return m_tiny2Capabilities; }
     void setAiMode(int mode);
     void setHumanSubMode(int subMode);
     void setAutoZoomEnabled(bool enabled);
@@ -48,6 +68,12 @@ public:
 
 signals:
     void mirrorToggled(bool mirrored);
+    void trackingIntentEdited(
+        const TrackingState &state, bool updateModeProfile);
+    void audioAutoGainIntentEdited(bool enabled);
+    void panTiltIntentEdited(double pan, double tilt);
+    void zoomIntentEdited(double zoom);
+    void focusIntentEdited(int focus);
 
 private slots:
     void onTrackingToggled(bool checked);
@@ -55,7 +81,20 @@ private slots:
     void onHumanSubModeChanged(int index);
     void onAutoZoomToggled(bool checked);
     void onSpeedChanged(int index);
+    void onProfileFocusPolicyChanged(int index);
+    void onProfileFocusPositionChanged(int value);
     void onAudioGainToggled(bool checked);
+    void onManualControlToggled(bool checked);
+    void onDeskModeToggled(bool checked);
+    void onTrackingIntentStarted(quint64 intentGeneration);
+    void onTrackingStateConfirmationPending(
+        bool trackingEnabled, quint64 intentGeneration);
+    void onTrackingStateConfirmationFailed(
+        bool trackingEnabled, quint64 intentGeneration);
+    void onTrackingStateConfirmationUncertain(quint64 intentGeneration);
+    void onTrackingStateConfirmed(
+        bool trackingEnabled, quint64 intentGeneration);
+    void onTrackingOwnershipObserved(bool trackingEnabled);
 
     // Manual PTZ control slots
     void onXYPadChanged(float x, float y);
@@ -64,21 +103,44 @@ private slots:
 
 private:
     CameraController *m_controller;
+    friend struct TrackingControlWidgetTestAccess;
     QCheckBox *m_trackingCheckBox;
     QComboBox *m_modeCombo;
     QComboBox *m_humanSubModeCombo;
     QCheckBox *m_autoZoomCheckBox;
+    QCheckBox *m_deskModeCheckBox;
     QComboBox *m_speedCombo;
+    QComboBox *m_profileFocusPolicyCombo;
+    QSlider *m_profileFocusSlider;
+    QLabel *m_profileFocusLabel;
     QCheckBox *m_audioGainCheckBox;
     QWidget *m_advancedContainer;
     bool m_userInitiated;  // Track if change was user-initiated
+    bool m_manualOverrideActive;  // Explicit operator intent; camera status cannot clear it
+    bool m_manualControlAuthorized;  // True only after AI ownership is known to be off
+    bool m_manualConfirmationPending;
+    bool m_trackingConfirmationPending;
+    // Retained after completion so delayed signals from older intents cannot
+    // mutate the current ownership decision.
+    quint64 m_pendingTrackingIntentGeneration;
+    quint64 m_highestTrackingIntentGeneration;
+    bool m_trackingIntentResolved;
     QTimer *m_commandTimer;  // Debounce timer for command completion
+    QTimer *m_profileFocusTimer;  // Coalesces profile focus slider edits
+    bool m_v4l2Only;  // No SDK ownership confirmation is available
     bool m_tiny2Capabilities; // flag for advanced tracking features
+    int m_lastAcceptedAiMode = Device::AiWorkModeNone;
+    int m_lastAcceptedHumanSubMode = Device::AiSubModeNormal;
+    Tiny2TrackingModeProfiles m_modeProfiles =
+        defaultTiny2TrackingModeProfiles();
+    TrackingModeProfile m_activeTrackingProfile{};
 
     // Manual PTZ controls
     XYPad *m_xyPad;
     QCheckBox *m_invertControlsCheckBox;
     QCheckBox *m_mirrorCheckBox;
+    QCheckBox *m_manualControlCheckBox;
+    QGroupBox *m_ptzGroupBox;
     QSlider *m_zoomSlider;
     QLabel *m_zoomLabel;
     QSlider *m_focusSlider;
@@ -97,6 +159,9 @@ private:
     bool m_dirtyFocus = false;
     void flushPendingCommands();
     void scheduleFlush();
+    void submitCurrentTrackingProfile();
+    void persistActiveTrackingIntent(bool updateModeProfile);
+    void storeActiveProfileForCurrentMode();
 
     void updateTiny2Visibility();
     void updatePTZControlsState();

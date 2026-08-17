@@ -32,6 +32,9 @@ public:
     void setEnabled(bool enabled);
     void setForcedResolution(const QSize &resolution);
     QSize forcedResolution() const { return m_forcedResolution; }
+    static QSize normalizedOutputSize(const QSize &resolution);
+    static QImage prepareFrameForOutput(
+        const QImage &frame, const QSize &forcedResolution = QSize());
 
 public slots:
     void onProcessedFrameReady(const QImage &frame);

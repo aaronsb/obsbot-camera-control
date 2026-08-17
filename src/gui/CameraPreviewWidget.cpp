@@ -125,6 +125,8 @@ void CameraPreviewWidget::setupUI()
                     m_virtualCameraStreamer->onProcessedFrameReady(image);
                 }
             });
+    connect(m_filterPreviewWidget, &FilterPreviewWidget::paperDetectionChanged,
+            this, &CameraPreviewWidget::paperDetectionChanged);
 }
 
 bool CameraPreviewWidget::isPreviewEnabled() const
@@ -201,6 +203,13 @@ void CameraPreviewWidget::setVideoEffects(const FilterPreviewWidget::VideoEffect
     m_filterPreviewWidget->setVideoEffects(settings);
 }
 
+void CameraPreviewWidget::resetPaperDetection()
+{
+    if (m_filterPreviewWidget) {
+        m_filterPreviewWidget->resetPaperDetection();
+    }
+}
+
 FilterPreviewWidget::VideoEffectsSettings CameraPreviewWidget::videoEffects() const
 {
     if (!m_filterPreviewWidget) {
@@ -256,6 +265,9 @@ void CameraPreviewWidget::startPreview()
 void CameraPreviewWidget::stopPreview()
 {
     disconnect(m_snapshotConnection);
+    if (m_filterPreviewWidget) {
+        m_filterPreviewWidget->resetPaperDetection();
+    }
 
     if (m_videoSink) {
         disconnect(m_videoSink, nullptr, this, nullptr);

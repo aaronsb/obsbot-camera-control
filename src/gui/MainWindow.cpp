@@ -6,6 +6,7 @@
 #include <QWidget>
 #include <QIcon>
 #include <QEvent>
+#include <QEventLoop>
 #include <QWindowStateChangeEvent>
 #include <QApplication>
 #include <QCoreApplication>
@@ -33,6 +34,9 @@
 #include <QClipboard>
 #include <QDateTime>
 #include <QDir>
+#include <QDBusConnection>
+#include <QDBusError>
+#include <QDebug>
 #include <QFile>
 #include <QFileInfo>
 #include <QStandardPaths>
@@ -175,8 +179,11 @@ MainWindow::MainWindow(QWidget *parent)
             this, &MainWindow::onCameraDisconnected);
     connect(m_controller, &CameraController::stateChanged,
             this, &MainWindow::onStateChanged);
+    // Defer modal error UI until the initiating control path has completed its
+    // safety rollback. A direct connection would open a nested event loop first.
     connect(m_controller, &CameraController::commandFailed,
-            this, &MainWindow::onCommandFailed);
+            this, &MainWindow::onCommandFailed,
+            Qt::QueuedConnection);
 
     m_virtualCameraStreamer = new VirtualCameraStreamer(this);
     connect(m_virtualCameraStreamer, &VirtualCameraStreamer::errorOccurred,
@@ -184,6 +191,162 @@ MainWindow::MainWindow(QWidget *parent)
 
     setupUI();
     setupTrayIcon();
+
+    // Config is the explicit persisted-intent model. These value-bearing
+    // signals update only the fields the operator actually edited; SDK status
+    // telemetry never flows into this model.
+    connect(m_trackingWidget, &TrackingControlWidget::trackingIntentEdited,
+            this, [this](const TrackingIntentState &tracking,
+                         bool updateModeProfile) {
+        updatePersistedIntent(
+            [this, tracking, updateModeProfile](
+                Config::CameraSettings &settings) {
+                storeTrackingIntent(
+                    settings, tracking, updateModeProfile);
+            });
+    });
+    connect(m_trackingWidget, &TrackingControlWidget::audioAutoGainIntentEdited,
+            this, [this](bool enabled) {
+        updatePersistedIntent([=](Config::CameraSettings &settings) {
+            settings.audioAutoGain = enabled;
+            settings.imageIntentDefined =
+                !m_controller->isV4l2Only();
+        });
+    });
+    connect(m_trackingWidget, &TrackingControlWidget::panTiltIntentEdited,
+            this, [this](double pan, double tilt) {
+        updatePersistedIntent([=](Config::CameraSettings &settings) {
+            settings.pan = pan;
+            settings.tilt = tilt;
+            settings.panTiltIntentDefined = true;
+        });
+    });
+    connect(m_trackingWidget, &TrackingControlWidget::zoomIntentEdited,
+            this, [this](double zoom) {
+        updatePersistedIntent([=](Config::CameraSettings &settings) {
+            settings.zoom = zoom;
+            settings.zoomIntentDefined = true;
+        });
+    });
+    connect(m_trackingWidget, &TrackingControlWidget::focusIntentEdited,
+            this, [this](int focus) {
+        updatePersistedIntent([=](Config::CameraSettings &settings) {
+            settings.focus = focus;
+        });
+    });
+
+    connect(m_settingsWidget, &CameraSettingsWidget::hdrIntentEdited,
+            this, [this](bool enabled) {
+        updatePersistedIntent([=](Config::CameraSettings &settings) {
+            settings.hdr = enabled;
+            settings.imageIntentDefined =
+                !m_controller->isV4l2Only();
+        });
+    });
+    connect(m_settingsWidget, &CameraSettingsWidget::fovIntentEdited,
+            this, [this](int mode) {
+        updatePersistedIntent([=](Config::CameraSettings &settings) {
+            settings.fov = mode;
+            settings.imageIntentDefined =
+                !m_controller->isV4l2Only();
+        });
+    });
+    connect(m_settingsWidget, &CameraSettingsWidget::faceAEIntentEdited,
+            this, [this](bool enabled) {
+        updatePersistedIntent([=](Config::CameraSettings &settings) {
+            settings.faceAE = enabled;
+            settings.imageIntentDefined =
+                !m_controller->isV4l2Only();
+        });
+    });
+    connect(m_settingsWidget, &CameraSettingsWidget::faceFocusIntentEdited,
+            this, [this](bool enabled) {
+        if (!m_controller->hasTiny2Capabilities()) {
+            updatePersistedIntent([=](Config::CameraSettings &settings) {
+                settings.faceFocus = enabled;
+                settings.imageIntentDefined =
+                    !m_controller->isV4l2Only();
+            });
+        }
+    });
+    connect(m_settingsWidget, &CameraSettingsWidget::brightnessIntentEdited,
+            this, [this](bool automatic, int value) {
+        updatePersistedIntent([=](Config::CameraSettings &settings) {
+            settings.brightnessAuto = automatic;
+            settings.brightness = value;
+            settings.imageIntentDefined =
+                !m_controller->isV4l2Only();
+        });
+    });
+    connect(m_settingsWidget, &CameraSettingsWidget::contrastIntentEdited,
+            this, [this](bool automatic, int value) {
+        updatePersistedIntent([=](Config::CameraSettings &settings) {
+            settings.contrastAuto = automatic;
+            settings.contrast = value;
+            settings.imageIntentDefined =
+                !m_controller->isV4l2Only();
+        });
+    });
+    connect(m_settingsWidget, &CameraSettingsWidget::saturationIntentEdited,
+            this, [this](bool automatic, int value) {
+        updatePersistedIntent([=](Config::CameraSettings &settings) {
+            settings.saturationAuto = automatic;
+            settings.saturation = value;
+            settings.imageIntentDefined =
+                !m_controller->isV4l2Only();
+        });
+    });
+    connect(m_settingsWidget, &CameraSettingsWidget::whiteBalanceIntentEdited,
+            this, [this](int mode, int kelvin) {
+        updatePersistedIntent([=](Config::CameraSettings &settings) {
+            settings.whiteBalance = mode;
+            settings.whiteBalanceKelvin = kelvin;
+            settings.imageIntentDefined =
+                !m_controller->isV4l2Only();
+        });
+    });
+
+    connect(m_ptzWidget, &PTZControlWidget::sceneIntentApplied,
+            this, [this](const TrackingIntentState &tracking,
+                         bool positionApplied,
+                         double pan, double tilt, double zoom,
+                         const PaperCropSettings &paperCrop) {
+        // Commit the complete successfully applied scene once. Programmatic
+        // crop rendering no longer writes a crop-only intermediate state.
+        auto settings = m_controller->getConfig().getSettings();
+        storeTrackingIntent(settings, tracking, false);
+        const PaperCropSettings crop = paperCrop.normalized();
+        settings.paperCropMode = static_cast<int>(crop.mode);
+        settings.paperCropLeft = crop.left;
+        settings.paperCropTop = crop.top;
+        settings.paperCropRight = crop.right;
+        settings.paperCropBottom = crop.bottom;
+        if (positionApplied) {
+            settings.pan = pan;
+            settings.tilt = tilt;
+            settings.zoom = zoom;
+            settings.panTiltIntentDefined = true;
+            settings.zoomIntentDefined = true;
+        }
+        m_controller->getConfig().setSettings(settings);
+        m_controller->saveConfig();
+    });
+
+    QDBusConnection sessionBus = QDBusConnection::sessionBus();
+    if (sessionBus.registerService(QStringLiteral("com.obsbot.CameraControl"))) {
+        m_dbusRegistered = sessionBus.registerObject(
+            QStringLiteral("/CameraControl"),
+            this,
+            QDBusConnection::ExportScriptableSlots);
+        if (!m_dbusRegistered) {
+            qWarning() << "Failed to register OBSBOT D-Bus object:"
+                       << sessionBus.lastError().message();
+            sessionBus.unregisterService(QStringLiteral("com.obsbot.CameraControl"));
+        }
+    } else {
+        qWarning() << "Failed to own OBSBOT D-Bus service:"
+                   << sessionBus.lastError().message();
+    }
 
     // Load configuration
     loadConfiguration();
@@ -204,8 +367,18 @@ MainWindow::MainWindow(QWidget *parent)
     });
 #endif
 
-    // Start connecting to camera
-    m_controller->connectToCamera();
+    // Bind startup to the camera shown in the selector. Once the SDK resolves
+    // it, CameraController retains the stable serial across reconnects.
+    if (!m_detectedCameras.isEmpty()) {
+        const int selectedIndex = m_cameraSelectorCombo
+            ? qBound(0, m_cameraSelectorCombo->currentIndex(),
+                     m_detectedCameras.size() - 1)
+            : 0;
+        const auto &camera = m_detectedCameras[selectedIndex];
+        m_controller->connectToCamera(camera.devicePath, camera.serial);
+    } else {
+        m_controller->connectToCamera();
+    }
 
     // Update status periodically
     m_statusTimer = new QTimer(this);
@@ -215,15 +388,203 @@ MainWindow::MainWindow(QWidget *parent)
 
 MainWindow::~MainWindow()
 {
-    // Save config on exit
-    if (m_controller->isConnected()) {
-        m_controller->saveConfig();
+    if (m_dbusRegistered) {
+        QDBusConnection sessionBus = QDBusConnection::sessionBus();
+        sessionBus.unregisterObject(QStringLiteral("/CameraControl"));
+        sessionBus.unregisterService(QStringLiteral("com.obsbot.CameraControl"));
     }
+
+    // Config already contains explicit intent only, so it is safe to save even
+    // after the camera has disconnected.
+    m_controller->saveConfig();
 }
 
 bool MainWindow::isStartingMinimized() const
 {
     return m_controller->getConfig().getSettings().startMinimized;
+}
+
+bool MainWindow::recallPreset(int presetNumber)
+{
+    const int index = presetNumber - 1;
+    if (!m_ptzWidget || !m_ptzWidget->canRecallPreset(index)
+        || m_remoteRecallInProgress || m_pendingRemotePreset >= 0) {
+        return false;
+    }
+
+    m_remoteRecallInProgress = true;
+    const quint64 operationGeneration = ++m_cameraSwitchGeneration;
+    QString targetSerial = m_controller->selectedDeviceSerial();
+    QString targetPath = m_controller->selectedDevicePath();
+
+    const auto bindConnectedTarget =
+        [this, &targetSerial, &targetPath](
+            const CameraController::CameraInfo &info) {
+        if (targetSerial.isEmpty() && targetPath.isEmpty()) {
+            targetSerial = info.serialNumber;
+            targetPath = m_controller->getVideoDevicePath();
+        }
+    };
+    const auto matchesTarget = [this, &targetSerial, &targetPath]() {
+        if (!m_controller->isConnected()) {
+            return false;
+        }
+        const auto info = m_controller->getCameraInfo();
+        if (!targetSerial.isEmpty()) {
+            return info.serialNumber == targetSerial;
+        }
+        if (!targetPath.isEmpty()) {
+            return m_controller->getVideoDevicePath() == targetPath;
+        }
+        return true;
+    };
+    const auto operationCurrent =
+        [this, operationGeneration, &matchesTarget]() {
+        return operationGeneration == m_cameraSwitchGeneration
+            && matchesTarget();
+    };
+
+    const auto awaitCompletion =
+        [this, &operationCurrent](bool accepted) {
+        if (!accepted || !m_ptzWidget->hasPendingRecall()) {
+            return accepted && operationCurrent();
+        }
+
+        bool completed = false;
+        bool succeeded = false;
+        bool superseded = false;
+        QEventLoop waitForCompletion;
+        QTimer timeout;
+        timeout.setSingleShot(true);
+        timeout.setInterval(10000);
+        QTimer supersessionPoll;
+        supersessionPoll.setInterval(25);
+        connect(&timeout, &QTimer::timeout,
+                &waitForCompletion, &QEventLoop::quit);
+        connect(&supersessionPoll, &QTimer::timeout,
+                &waitForCompletion,
+                [&operationCurrent, &superseded, &waitForCompletion]() {
+            if (!operationCurrent()) {
+                superseded = true;
+                waitForCompletion.quit();
+            }
+        });
+        connect(m_ptzWidget, &PTZControlWidget::presetRecallFinished,
+                &waitForCompletion,
+                [&operationCurrent, &completed, &succeeded, &superseded,
+                 &waitForCompletion](bool success) {
+            if (!operationCurrent()) {
+                superseded = true;
+            } else {
+                completed = true;
+                succeeded = success;
+            }
+            waitForCompletion.quit();
+        });
+        timeout.start();
+        supersessionPoll.start();
+        waitForCompletion.exec();
+        if (!completed || superseded) {
+            m_ptzWidget->cancelPendingRecall();
+            return false;
+        }
+        return succeeded && operationCurrent();
+    };
+
+    const auto finishRecall =
+        [this, &operationCurrent](bool success) {
+        const bool current = operationCurrent();
+        m_remoteRecallInProgress = false;
+        if (!current) {
+            return false;
+        }
+
+        m_isCameraSwitch = false;
+        if (success) {
+            m_initialCameraStateApplied = true;
+        } else if (!m_initialCameraStateApplied) {
+            // A failed first-connection recall suppressed normal startup apply;
+            // restore configured intent only on the same exact connection.
+            enforceAutomaticPaperCropTrackingPolicy();
+            m_controller->applyConfigToCamera();
+            m_initialCameraStateApplied = true;
+        }
+        return success;
+    };
+
+    if (m_controller->isConnected()) {
+        bindConnectedTarget(m_controller->getCameraInfo());
+        if (!operationCurrent()) {
+            return finishRecall(false);
+        }
+        return finishRecall(
+            awaitCompletion(m_ptzWidget->recallPreset(index)));
+    }
+
+    m_pendingRemotePreset = index;
+    bool recalled = false;
+    bool superseded = false;
+    bool continuationScheduled = false;
+    QEventLoop waitForRecall;
+    QTimer timeout;
+    timeout.setSingleShot(true);
+    timeout.setInterval(10000);
+    QTimer supersessionPoll;
+    supersessionPoll.setInterval(25);
+    connect(&timeout, &QTimer::timeout,
+            &waitForRecall, &QEventLoop::quit);
+    connect(&supersessionPoll, &QTimer::timeout,
+            &waitForRecall,
+            [this, operationGeneration, &matchesTarget, &superseded,
+             &waitForRecall]() {
+        if (operationGeneration != m_cameraSwitchGeneration
+            || (m_controller->isConnected() && !matchesTarget())) {
+            superseded = true;
+            waitForRecall.quit();
+        }
+    });
+    connect(m_controller, &CameraController::cameraConnected, &waitForRecall,
+            [this, index, operationGeneration, &bindConnectedTarget,
+             &matchesTarget, &waitForRecall, &recalled, &superseded,
+             &continuationScheduled](const CameraController::CameraInfo &info) {
+        if (operationGeneration != m_cameraSwitchGeneration) {
+            superseded = true;
+            waitForRecall.quit();
+            return;
+        }
+        bindConnectedTarget(info);
+        if (!matchesTarget()) {
+            superseded = true;
+            waitForRecall.quit();
+            return;
+        }
+        if (continuationScheduled) {
+            return;
+        }
+        continuationScheduled = true;
+        QTimer::singleShot(
+            150, &waitForRecall,
+            [this, index, operationGeneration, &matchesTarget,
+             &waitForRecall, &recalled, &superseded]() {
+            if (operationGeneration != m_cameraSwitchGeneration
+                || !matchesTarget()) {
+                superseded = true;
+            } else {
+                recalled = m_ptzWidget->recallPreset(index);
+            }
+            waitForRecall.quit();
+        });
+    });
+
+    m_controller->connectToCamera();
+    timeout.start();
+    supersessionPoll.start();
+    waitForRecall.exec();
+    m_pendingRemotePreset = -1;
+    if (superseded) {
+        m_ptzWidget->cancelPendingRecall();
+    }
+    return finishRecall(awaitCompletion(recalled && !superseded));
 }
 
 void MainWindow::setupUI()
@@ -396,6 +757,8 @@ void MainWindow::setupUI()
     m_reconnectButton = new QPushButton(tr("Reconnect"), actionRow);
     m_reconnectButton->setObjectName("secondaryAction");
     connect(m_reconnectButton, &QPushButton::clicked, this, [this]() {
+        ++m_cameraSwitchGeneration;
+        m_controller->saveConfig();
         m_controller->disconnectFromCamera();
         m_controller->connectToCamera();
     });
@@ -407,6 +770,7 @@ void MainWindow::setupUI()
     m_ptzWidget = new PTZControlWidget(m_controller, this);
     m_settingsWidget = new CameraSettingsWidget(m_controller, this);
     m_ptzWidget->setCameraSettingsWidget(m_settingsWidget);
+    m_ptzWidget->setTrackingControlWidget(m_trackingWidget);
     connect(m_ptzWidget, &PTZControlWidget::presetUpdated,
             this, &MainWindow::onPresetUpdated);
 
@@ -417,8 +781,15 @@ void MainWindow::setupUI()
     m_tabWidget->addTab(m_ptzWidget, tr("Presets"));
     m_tabWidget->addTab(m_settingsWidget, tr("Camera Image"));
     m_effectsWidget = new VideoEffectsWidget(this);
+    m_ptzWidget->setVideoEffectsWidget(m_effectsWidget);
     connect(m_effectsWidget, &VideoEffectsWidget::effectsChanged,
             this, &MainWindow::onVideoEffectsChanged);
+    connect(m_effectsWidget, &VideoEffectsWidget::paperCropIntentEdited,
+            this, &MainWindow::onPaperCropIntentEdited);
+    connect(m_effectsWidget, &VideoEffectsWidget::paperDetectionResetRequested,
+            m_previewWidget, &CameraPreviewWidget::resetPaperDetection);
+    connect(m_previewWidget, &CameraPreviewWidget::paperDetectionChanged,
+            m_effectsWidget, &VideoEffectsWidget::setPaperDetected);
     // Mirror checkbox in tracking tab syncs with Creative FX horizontal flip
     connect(m_trackingWidget, &TrackingControlWidget::mirrorToggled,
             this, [this](bool mirrored) {
@@ -1056,15 +1427,180 @@ void MainWindow::onCameraConnected(const CameraController::CameraInfo &info)
     m_trackingWidget->setV4l2Mode(v4l2Mode);
     m_settingsWidget->setV4l2Mode(v4l2Mode);
 
-    QTimer::singleShot(100, this, [this]() {
-        if (m_isCameraSwitch) {
-            // Pull the new camera's actual state into the UI
-            // without pushing the old camera's state back
+    const bool initialApplicationWasPending =
+        !m_initialCameraStateApplied;
+    const quint64 switchGeneration = m_cameraSwitchGeneration;
+    const QString connectedSerial = info.serialNumber;
+    const QString connectedPath = m_controller->getVideoDevicePath();
+    QTimer::singleShot(100, this,
+                       [this, initialApplicationWasPending, switchGeneration,
+                        connectedSerial, connectedPath]() {
+        if (switchGeneration != m_cameraSwitchGeneration
+            || !m_controller->isConnected()) {
+            return;
+        }
+        const auto currentInfo = m_controller->getCameraInfo();
+        if ((!connectedSerial.isEmpty()
+             && currentInfo.serialNumber != connectedSerial)
+            || (connectedSerial.isEmpty()
+                && m_controller->getVideoDevicePath() != connectedPath)) {
+            return;
+        }
+
+        if (m_remoteRecallInProgress || m_pendingRemotePreset >= 0) {
+            // The synchronous D-Bus recall path owns this exact connection
+            // cycle and will establish preset intent or restore configuration.
+            m_isCameraSwitch = false;
+            return;
+        } else if (m_isCameraSwitch) {
+            // Pull the new camera's actual state into the UI without pushing
+            // unrelated settings from the old camera. If manual intent remains
+            // selected, reassert only tracking-off so movement is unlocked by
+            // an exact confirmation from the newly selected device.
             auto state = m_controller->getCurrentState();
             onStateChanged(state);
             m_isCameraSwitch = false;
+            if (!m_controller->isV4l2Only()) {
+                // Camera selection adopts only the new camera's observed AI
+                // ownership plus the global profile for that mode. It never
+                // pushes the prior camera's PTZ/image state, and the adopted
+                // intent is persisted so reconnect cannot reverse the switch.
+                const auto previousSettings =
+                    m_controller->getConfig().getSettings();
+                auto settings = previousSettings;
+                const bool tiny2 = m_controller->hasTiny2Capabilities();
+                const bool stableTiny2Mode = state.aiMode
+                        >= Device::AiWorkModeNone
+                    && state.aiMode <= Device::AiWorkModeDesk;
+                TrackingIntentState selectedTracking;
+                if (tiny2 && stableTiny2Mode
+                    && state.aiMode != Device::AiWorkModeNone) {
+                    selectedTracking.enabled = true;
+                    selectedTracking.aiMode = state.aiMode;
+                    selectedTracking.aiSubMode =
+                        state.aiMode == Device::AiWorkModeHuman
+                        ? state.aiSubMode : 0;
+                    const int profileIndex =
+                        tiny2TrackingModeProfileIndex(state.aiMode);
+                    selectedTracking.profile =
+                        settings.trackingModeProfiles[
+                            static_cast<std::size_t>(profileIndex)];
+                } else if (!tiny2 && state.autoFramingEnabled) {
+                    selectedTracking.enabled = true;
+                    selectedTracking.aiMode = Device::AiWorkModeHuman;
+                    selectedTracking.aiSubMode = Device::AiSubModeNormal;
+                    selectedTracking.profile =
+                        settings.activeTrackingProfile;
+                } else {
+                    selectedTracking.enabled = false;
+                    selectedTracking.aiMode = tiny2 && stableTiny2Mode
+                        ? state.aiMode : Device::AiWorkModeNone;
+                    selectedTracking.aiSubMode = 0;
+                    selectedTracking.profile = {
+                        TrackingFocusPolicy::Manual,
+                        qBound(0, state.manualFocusValue, 100),
+                        false,
+                        settings.activeTrackingProfile.trackSpeed
+                    };
+                }
+
+                selectedTracking =
+                    applyAutomaticPaperCropTrackingPolicy(
+                        settings.paperCropMode,
+                        tiny2,
+                        selectedTracking,
+                        settings.trackingModeProfiles);
+                storeTrackingIntent(
+                    settings, selectedTracking, false);
+
+                settings.panTiltIntentDefined = state.panTiltKnown;
+                if (state.panTiltKnown) {
+                    settings.pan = state.pan;
+                    settings.tilt = state.tilt;
+                }
+                settings.zoomIntentDefined = state.zoomKnown;
+                if (state.zoomKnown) {
+                    settings.zoom = state.zoom;
+                }
+                settings.imageIntentDefined = state.imageSettingsKnown;
+                if (state.imageSettingsKnown) {
+                    settings.hdr = state.hdrEnabled;
+                    settings.fov = state.fovMode;
+                    settings.faceAE = state.faceAEEnabled;
+                    settings.faceFocus = state.faceFocusEnabled;
+                    settings.brightness = state.brightness;
+                    settings.contrast = state.contrast;
+                    settings.saturation = state.saturation;
+                    settings.whiteBalance = state.whiteBalance;
+                    settings.whiteBalanceKelvin =
+                        state.whiteBalanceKelvin;
+                    settings.audioAutoGain =
+                        state.audioAutoGainEnabled;
+                }
+                m_controller->getConfig().setSettings(settings);
+                if (!m_controller->saveConfig()) {
+                    m_controller->getConfig().setSettings(previousSettings);
+                    if (m_statusLabel) {
+                        m_statusLabel->setText(tr(
+                            "Selected camera retained its current state: adopted intent could not be saved."));
+                    }
+                    qWarning() << "MainWindow: selected-camera intent was not "
+                                  "applied because persistence failed";
+                    return;
+                }
+                m_trackingWidget->applyTrackingState(selectedTracking);
+            } else {
+                // V4L2 cannot prove AI ownership or expose all camera state.
+                // Persist a safe off intent and invalidate every camera-bound
+                // category so a later SDK reconnect cannot apply the prior
+                // camera's movement or image values.
+                const auto previousSettings =
+                    m_controller->getConfig().getSettings();
+                auto settings = previousSettings;
+                const TrackingIntentState safeOff{
+                    false,
+                    Device::AiWorkModeNone,
+                    0,
+                    {
+                        TrackingFocusPolicy::Manual,
+                        settings.activeTrackingProfile.manualFocusPosition,
+                        false,
+                        settings.activeTrackingProfile.trackSpeed
+                    }
+                };
+                storeTrackingIntent(settings, safeOff, false);
+                settings.panTiltIntentDefined = false;
+                settings.zoomIntentDefined = false;
+                settings.imageIntentDefined = false;
+                m_controller->getConfig().setSettings(settings);
+                if (!m_controller->saveConfig()) {
+                    m_controller->getConfig().setSettings(previousSettings);
+                    if (m_statusLabel) {
+                        m_statusLabel->setText(tr(
+                            "Selected V4L2 camera safe intent could not be saved."));
+                    }
+                    qWarning() << "MainWindow: selected V4L2 safe intent "
+                                  "persistence failed";
+                    return;
+                }
+                m_trackingWidget->setTrackingStatePresentation(safeOff);
+            }
+        } else if (initialApplicationWasPending) {
+            if (!m_initialCameraStateApplied) {
+                // The SDK emits an immediate pre-restore status snapshot when
+                // the device is discovered. Apply persisted intent directly on
+                // the first connection instead of feeding that snapshot back.
+                enforceAutomaticPaperCropTrackingPolicy();
+                m_controller->applyConfigToCamera();
+                m_initialCameraStateApplied = true;
+            }
+            // A first-connection preset recall may already have established
+            // intent; never overwrite it with the startup configuration.
         } else {
-            m_controller->applyCurrentStateToCamera(getUIState());
+            // Same-device reconnects reapply the explicit persisted-intent
+            // model, never telemetry-oriented widget/controller state.
+            enforceAutomaticPaperCropTrackingPolicy();
+            m_controller->applyConfigToCamera();
         }
     });
 
@@ -1103,6 +1639,13 @@ void MainWindow::onCameraDisconnected()
 
 void MainWindow::onStateChanged(const CameraController::CameraState &state)
 {
+    if (!m_initialCameraStateApplied) {
+        // Keep the loaded configuration authoritative until its first camera
+        // application. Otherwise discovery-time SDK defaults overwrite the UI
+        // before onCameraConnected() can restore persisted intent.
+        return;
+    }
+
     // Update all widgets with new state
     m_trackingWidget->updateFromState(state);
     m_settingsWidget->updateFromState(state);
@@ -1121,8 +1664,15 @@ void MainWindow::fitTabToCurrentPage()
 
 void MainWindow::onCommandFailed(const QString &description, int errorCode)
 {
-    QMessageBox::warning(this, "Command Failed",
-        QString("%1 failed with error code: %2").arg(description).arg(errorCode));
+    auto *dialog = new QMessageBox(
+        QMessageBox::Warning,
+        tr("Command Failed"),
+        tr("%1 failed with error code: %2").arg(description).arg(errorCode),
+        QMessageBox::Ok,
+        this);
+    dialog->setAttribute(Qt::WA_DeleteOnClose);
+    dialog->setModal(false);
+    dialog->show();
 }
 
 void MainWindow::updateStatus()
@@ -1227,6 +1777,115 @@ void MainWindow::updateVirtualCameraStreamerState()
     m_virtualCameraStreamer->setEnabled(enableOutput);
 }
 
+void MainWindow::updatePersistedIntent(
+    const std::function<void(Config::CameraSettings &)> &update)
+{
+    auto settings = m_controller->getConfig().getSettings();
+    update(settings);
+    m_controller->getConfig().setSettings(settings);
+}
+
+TrackingIntentState MainWindow::trackingIntentFromSettings(
+    const Config::CameraSettings &settings) const
+{
+    return {
+        settings.faceTracking,
+        settings.aiMode,
+        settings.aiMode == Device::AiWorkModeHuman
+            ? settings.aiSubMode : 0,
+        settings.activeTrackingProfile
+    };
+}
+
+void MainWindow::storeTrackingIntent(
+    Config::CameraSettings &settings,
+    const TrackingIntentState &tracking,
+    bool updateModeProfile) const
+{
+    TrackingIntentState normalized = tracking;
+    const TrackingModeProfile editedModeProfile = tracking.profile;
+    if (normalized.enabled
+        && normalized.aiMode == Device::AiWorkModeNone) {
+        normalized.aiMode = Device::AiWorkModeHuman;
+    }
+    if (normalized.aiMode != Device::AiWorkModeHuman) {
+        normalized.aiSubMode = 0;
+    }
+    if (!normalized.enabled) {
+        if (updateModeProfile) {
+            // Profile controls edit the retained AI mode while camera intent
+            // remains manual/off. Do not replace active manual focus with the
+            // profile editor's autofocus choice.
+            normalized.profile = settings.activeTrackingProfile;
+        }
+        normalized.profile.focusPolicy = TrackingFocusPolicy::Manual;
+        normalized.profile.autoZoom = false;
+    }
+
+    settings.faceTracking = normalized.enabled;
+    settings.aiMode = normalized.aiMode;
+    settings.aiSubMode = normalized.aiSubMode;
+    settings.activeTrackingProfile = normalized.profile;
+    settings.autoZoom = normalized.enabled && normalized.profile.autoZoom;
+    settings.trackSpeed = normalized.profile.trackSpeed;
+    settings.faceFocus =
+        normalized.profile.focusPolicy == TrackingFocusPolicy::Face;
+    settings.focus =
+        normalized.profile.focusPolicy == TrackingFocusPolicy::Continuous
+        ? -1 : normalized.profile.manualFocusPosition;
+
+    if (updateModeProfile) {
+        const int profileIndex =
+            tiny2TrackingModeProfileIndex(normalized.aiMode);
+        if (profileIndex >= 0) {
+            settings.trackingModeProfiles[
+                static_cast<std::size_t>(profileIndex)] =
+                editedModeProfile;
+        }
+    }
+}
+
+bool MainWindow::enforceAutomaticPaperCropTrackingPolicy()
+{
+    if (!m_controller->isConnected()
+        || !m_controller->hasTiny2Capabilities()) {
+        return false;
+    }
+
+    auto settings = m_controller->getConfig().getSettings();
+    if (settings.paperCropMode
+        != static_cast<int>(PaperCropMode::Automatic)) {
+        return false;
+    }
+
+    const TrackingIntentState current =
+        trackingIntentFromSettings(settings);
+    const TrackingIntentState effective =
+        applyAutomaticPaperCropTrackingPolicy(
+            settings.paperCropMode,
+            true,
+            current,
+            settings.trackingModeProfiles);
+    if (effective != current) {
+        const auto previousSettings = settings;
+        storeTrackingIntent(settings, effective, false);
+        m_controller->getConfig().setSettings(settings);
+        if (!m_controller->saveConfig()) {
+            m_controller->getConfig().setSettings(previousSettings);
+            m_trackingWidget->setTrackingStatePresentation(current);
+            if (m_statusLabel) {
+                m_statusLabel->setText(tr(
+                    "Could not persist Automatic crop Desk mode; previous tracking retained."));
+            }
+            qWarning() << "MainWindow: Automatic crop Desk persistence "
+                          "failed; camera transition cancelled";
+            return false;
+        }
+    }
+    m_trackingWidget->setTrackingStatePresentation(effective);
+    return true;
+}
+
 void MainWindow::loadConfiguration()
 {
     std::vector<Config::ValidationError> errors;
@@ -1237,11 +1896,11 @@ void MainWindow::loadConfiguration()
 
     // Initialize UI widgets from config
     auto settings = m_controller->getConfig().getSettings();
-    m_trackingWidget->setTrackingEnabled(settings.faceTracking);
-    m_trackingWidget->setAiMode(settings.aiMode);
-    m_trackingWidget->setHumanSubMode(settings.aiSubMode);
-    m_trackingWidget->setAutoZoomEnabled(settings.autoZoom);
-    m_trackingWidget->setTrackSpeed(settings.trackSpeed);
+    m_trackingWidget->setModeProfiles(settings.trackingModeProfiles);
+    m_trackingWidget->setTrackingStatePresentation(
+        trackingIntentFromSettings(settings));
+    m_trackingWidget->setManualFocusPosition(
+        settings.activeTrackingProfile.manualFocusPosition);
     m_trackingWidget->setAudioAutoGain(settings.audioAutoGain);
     m_settingsWidget->setHDREnabled(settings.hdr);
     m_settingsWidget->setFOVMode(settings.fov);
@@ -1258,6 +1917,16 @@ void MainWindow::loadConfiguration()
     m_settingsWidget->setWhiteBalance(settings.whiteBalance);
     m_previewWidget->setPreferredFormatId(QString::fromStdString(settings.previewFormat));
 
+    auto effects = m_effectsWidget->settings();
+    effects.paperCrop = {
+        static_cast<PaperCropMode>(settings.paperCropMode),
+        static_cast<float>(settings.paperCropLeft),
+        static_cast<float>(settings.paperCropTop),
+        static_cast<float>(settings.paperCropRight),
+        static_cast<float>(settings.paperCropBottom)
+    };
+    m_effectsWidget->applySettings(effects);
+
     std::array<PTZControlWidget::PresetState, 3> presetStates{};
     for (int i = 0; i < 3; ++i) {
         const auto &preset = settings.presets[static_cast<size_t>(i)];
@@ -1265,7 +1934,22 @@ void MainWindow::loadConfiguration()
             preset.defined,
             preset.pan,
             preset.tilt,
-            preset.zoom
+            preset.zoom,
+            preset.sceneDefined,
+            preset.trackingEnabled,
+            preset.aiMode,
+            preset.aiSubMode,
+            preset.autoZoom,
+            preset.focusPolicy,
+            preset.manualFocusPosition,
+            preset.trackSpeed,
+            {
+                static_cast<PaperCropMode>(preset.paperCropMode),
+                static_cast<float>(preset.paperCropLeft),
+                static_cast<float>(preset.paperCropTop),
+                static_cast<float>(preset.paperCropRight),
+                static_cast<float>(preset.paperCropBottom)
+            }
         };
     }
     m_ptzWidget->applyPresetStates(presetStates);
@@ -1422,13 +2106,18 @@ void MainWindow::changeEvent(QEvent *event)
                 m_previewToggleButton->setChecked(false);
             }
 
-            // Disconnect from camera to free resources
+            m_controller->saveConfig();
+
+            // Disconnect from camera to free resources and cancel any delayed
+            // selector connection without discarding its staged identity.
+            ++m_cameraSwitchGeneration;
             m_controller->disconnectFromCamera();
 
         } else if (stateEvent->oldState() & Qt::WindowMinimized) {
             // Window is being restored from minimized state
 
-            // ALWAYS reconnect to camera (regardless of preview state)
+            // ALWAYS reconnect to the staged exact target.
+            ++m_cameraSwitchGeneration;
             m_controller->connectToCamera();
 
             // ONLY restore preview if it was enabled before minimize
@@ -1523,18 +2212,33 @@ void MainWindow::onPreviewFormatChanged(const QString &formatId)
     updateVirtualCameraStreamerState();
 }
 
-void MainWindow::onPresetUpdated(int index, double pan, double tilt, double zoom, bool defined)
+void MainWindow::onPresetUpdated(int index)
 {
     auto settings = m_controller->getConfig().getSettings();
     if (index < 0 || index >= static_cast<int>(settings.presets.size())) {
         return;
     }
 
+    const auto uiPresets = m_ptzWidget->currentPresets();
+    const auto &ui = uiPresets[static_cast<size_t>(index)];
     auto &preset = settings.presets[static_cast<size_t>(index)];
-    preset.defined = defined;
-    preset.pan = pan;
-    preset.tilt = tilt;
-    preset.zoom = zoom;
+    preset.defined = ui.defined;
+    preset.pan = ui.pan;
+    preset.tilt = ui.tilt;
+    preset.zoom = ui.zoom;
+    preset.sceneDefined = ui.sceneDefined;
+    preset.trackingEnabled = ui.trackingEnabled;
+    preset.aiMode = ui.aiMode;
+    preset.aiSubMode = ui.aiSubMode;
+    preset.autoZoom = ui.autoZoom;
+    preset.focusPolicy = ui.focusPolicy;
+    preset.manualFocusPosition = ui.manualFocusPosition;
+    preset.trackSpeed = ui.trackSpeed;
+    preset.paperCropMode = static_cast<int>(ui.paperCrop.mode);
+    preset.paperCropLeft = ui.paperCrop.left;
+    preset.paperCropTop = ui.paperCrop.top;
+    preset.paperCropRight = ui.paperCrop.right;
+    preset.paperCropBottom = ui.paperCrop.bottom;
 
     m_controller->getConfig().setSettings(settings);
     m_controller->saveConfig();
@@ -1570,6 +2274,38 @@ void MainWindow::populateCameraSelector()
 
     if (!m_cameraSelectorCombo) return;
 
+    const QString selectedSerial = m_controller->selectedDeviceSerial();
+    const QString selectedPath = m_controller->selectedDevicePath();
+    int preferredIndex = -1;
+    for (int index = 0; index < m_detectedCameras.size(); ++index) {
+        const auto &camera = m_detectedCameras[index];
+        if ((!selectedSerial.isEmpty() && camera.serial == selectedSerial)
+            || (selectedSerial.isEmpty() && !selectedPath.isEmpty()
+                && camera.devicePath == selectedPath)) {
+            preferredIndex = index;
+            break;
+        }
+    }
+
+    bool selectedUnavailable = false;
+    if (preferredIndex < 0
+        && (!selectedSerial.isEmpty() || !selectedPath.isEmpty())) {
+        DetectedCamera unavailable;
+        unavailable.devicePath = selectedPath;
+        unavailable.serial = selectedSerial;
+        unavailable.available = false;
+        unavailable.label = selectedSerial.isEmpty()
+            ? tr("Selected camera unavailable (%1)").arg(selectedPath)
+            : tr("Selected camera unavailable [%1]").arg(selectedSerial);
+        m_detectedCameras.prepend(unavailable);
+        preferredIndex = 0;
+        selectedUnavailable = true;
+    }
+
+    const int availableCount = static_cast<int>(std::count_if(
+        m_detectedCameras.cbegin(), m_detectedCameras.cend(),
+        [](const DetectedCamera &camera) { return camera.available; }));
+
     m_cameraSelectorCombo->blockSignals(true);
     m_cameraSelectorCombo->clear();
 
@@ -1579,14 +2315,16 @@ void MainWindow::populateCameraSelector()
     } else {
         for (const auto &cam : std::as_const(m_detectedCameras))
             m_cameraSelectorCombo->addItem(cam.label);
-        m_cameraSelectorCombo->setEnabled(true);
+        m_cameraSelectorCombo->setCurrentIndex(
+            preferredIndex >= 0 ? preferredIndex : 0);
+        m_cameraSelectorCombo->setEnabled(availableCount > 0);
     }
     m_cameraSelectorCombo->blockSignals(false);
 
-    const bool multiCam = m_detectedCameras.size() > 1;
-    m_cameraSelectorCombo->setVisible(multiCam);
+    const bool showSelector = selectedUnavailable || availableCount > 1;
+    m_cameraSelectorCombo->setVisible(showSelector);
     if (m_cameraSelectorLabel)
-        m_cameraSelectorLabel->setVisible(multiCam);
+        m_cameraSelectorLabel->setVisible(showSelector);
 }
 
 void MainWindow::onCameraSelectorChanged(int index)
@@ -1594,11 +2332,65 @@ void MainWindow::onCameraSelectorChanged(int index)
     if (index < 0 || index >= m_detectedCameras.size()) return;
 
     const DetectedCamera &cam = m_detectedCameras[index];
+    if (!cam.available) {
+        return;
+    }
+
+    const QString previousDevicePath = m_controller->selectedDevicePath();
+    const QString previousSerial = m_controller->selectedDeviceSerial();
+    const auto previousSettings =
+        m_controller->getConfig().getSettings();
+    auto safeSettings = previousSettings;
+    const TrackingIntentState safeSwitchIntent{
+        false,
+        Device::AiWorkModeNone,
+        0,
+        {
+            TrackingFocusPolicy::Manual,
+            50,
+            false,
+            safeSettings.activeTrackingProfile.trackSpeed
+        }
+    };
+    storeTrackingIntent(safeSettings, safeSwitchIntent, false);
+    safeSettings.panTiltIntentDefined = false;
+    safeSettings.zoomIntentDefined = false;
+    safeSettings.imageIntentDefined = false;
+    m_controller->getConfig().setSettings(safeSettings);
+    if (!m_controller->saveConfig()) {
+        m_controller->getConfig().setSettings(previousSettings);
+        for (int previousIndex = 0;
+             previousIndex < m_detectedCameras.size(); ++previousIndex) {
+            const auto &candidate = m_detectedCameras[previousIndex];
+            const bool serialMatches = !previousSerial.isEmpty()
+                && candidate.serial == previousSerial;
+            const bool pathMatches = previousSerial.isEmpty()
+                && candidate.devicePath == previousDevicePath;
+            if (serialMatches || pathMatches) {
+                const bool wasBlocked =
+                    m_cameraSelectorCombo->blockSignals(true);
+                m_cameraSelectorCombo->setCurrentIndex(previousIndex);
+                m_cameraSelectorCombo->blockSignals(wasBlocked);
+                break;
+            }
+        }
+        if (m_statusLabel) {
+            m_statusLabel->setText(tr(
+                "Camera switch cancelled: safe intent could not be saved."));
+        }
+        qWarning() << "MainWindow: camera switch cancelled because safe "
+                      "intent persistence failed";
+        return;
+    }
+
+    // Stage the exact target only after the prior camera's movement/image
+    // intent has been durably invalidated. Any D-Bus recall, reconnect, or
+    // tray transition during the release delay is therefore fail-closed.
+    m_controller->selectCameraTarget(cam.devicePath, cam.serial);
 
     if (m_previewToggleButton->isChecked()) {
         m_previewToggleButton->setChecked(false);
     }
-
     m_previewWidget->setCameraDeviceId(cam.devicePath);
 
     // Brief delay after disconnect so the SDK releases the previous device
@@ -1606,10 +2398,20 @@ void MainWindow::onCameraSelectorChanged(int index)
     static constexpr int kCameraSwitchDelayMs = 300;
 
     const QString devicePath = cam.devicePath;
-    m_isCameraSwitch = true;
+    const QString serialNumber = cam.serial;
+    const quint64 switchGeneration = ++m_cameraSwitchGeneration;
+
     m_controller->disconnectFromCamera();
-    QTimer::singleShot(kCameraSwitchDelayMs, this, [this, devicePath]() {
-        m_controller->connectToCamera(devicePath);
+    // disconnectFromCamera() emits cameraDisconnected synchronously; arm the
+    // switch marker afterward so that callback cannot clear it before the new
+    // device connects.
+    m_isCameraSwitch = true;
+    QTimer::singleShot(kCameraSwitchDelayMs, this,
+                       [this, devicePath, serialNumber, switchGeneration]() {
+        if (switchGeneration != m_cameraSwitchGeneration) {
+            return;
+        }
+        m_controller->connectToCamera(devicePath, serialNumber);
     });
 }
 
@@ -1717,12 +2519,17 @@ void MainWindow::onShowHideAction()
             m_previewToggleButton->setChecked(false);
         }
 
-        // Disconnect from camera to free resources
+        m_controller->saveConfig();
+
+        // Disconnect from camera to free resources and cancel any delayed
+        // selector connection without discarding its staged identity.
+        ++m_cameraSwitchGeneration;
         m_controller->disconnectFromCamera();
 
         hide();
     } else {
-        // ALWAYS reconnect to camera when restoring from tray
+        // ALWAYS reconnect to the staged exact target when restoring from tray.
+        ++m_cameraSwitchGeneration;
         m_controller->connectToCamera();
 
         // ONLY restore preview if it was enabled before hiding
@@ -1740,10 +2547,7 @@ void MainWindow::onShowHideAction()
 
 void MainWindow::onQuitAction()
 {
-    // Save config before quitting
-    if (m_controller->isConnected()) {
-        m_controller->saveConfig();
-    }
+    m_controller->saveConfig();
     QApplication::quit();
 }
 
@@ -1764,7 +2568,11 @@ void MainWindow::closeEvent(QCloseEvent *event)
             m_previewToggleButton->setChecked(false);
         }
 
-        // Disconnect from camera to free resources
+        m_controller->saveConfig();
+
+        // Disconnect from camera to free resources and cancel any delayed
+        // selector connection without discarding its staged identity.
+        ++m_cameraSwitchGeneration;
         m_controller->disconnectFromCamera();
 
         hide();
@@ -1783,11 +2591,8 @@ void MainWindow::closeEvent(QCloseEvent *event)
         }
     } else {
         std::cout << "[MainWindow] closeEvent: Quitting application" << std::endl;
-        // Actually quit the application
-        // Save config before quitting
-        if (m_controller->isConnected()) {
-            m_controller->saveConfig();
-        }
+        // Persist explicit intent even if the camera disconnected first.
+        m_controller->saveConfig();
         if (m_previewWidget->isPreviewEnabled()) {
             m_previewToggleButton->setChecked(false);
         }
@@ -1904,13 +2709,73 @@ void MainWindow::onVirtualCameraError(const QString &message)
     updateVirtualCameraStreamerState();
 }
 
-void MainWindow::onVideoEffectsChanged(const FilterPreviewWidget::VideoEffectsSettings &settings)
+void MainWindow::onVideoEffectsChanged(
+    const FilterPreviewWidget::VideoEffectsSettings &settings)
 {
     if (!m_previewWidget) {
         return;
     }
+    // Rendering updates are intentionally separate from persisted operator
+    // crop intent. Startup, mirror sync, and scene recall all use this path.
     m_previewWidget->setVideoEffects(settings);
     m_trackingWidget->setMirrored(settings.horizontalFlip);
+}
+
+void MainWindow::onPaperCropIntentEdited(
+    const PaperCropSettings &requestedCrop)
+{
+    const PaperCropSettings crop = requestedCrop.normalized();
+    const auto previousSettings =
+        m_controller->getConfig().getSettings();
+    const PaperCropSettings previousCrop{
+        static_cast<PaperCropMode>(previousSettings.paperCropMode),
+        static_cast<float>(previousSettings.paperCropLeft),
+        static_cast<float>(previousSettings.paperCropTop),
+        static_cast<float>(previousSettings.paperCropRight),
+        static_cast<float>(previousSettings.paperCropBottom)
+    };
+    auto settings = previousSettings;
+    settings.paperCropMode = static_cast<int>(crop.mode);
+    settings.paperCropLeft = crop.left;
+    settings.paperCropTop = crop.top;
+    settings.paperCropRight = crop.right;
+    settings.paperCropBottom = crop.bottom;
+
+    const bool requiresDesk =
+        crop.mode == PaperCropMode::Automatic
+        && m_controller->isConnected()
+        && m_controller->hasTiny2Capabilities();
+    TrackingIntentState tracking = trackingIntentFromSettings(settings);
+    if (requiresDesk) {
+        tracking = applyAutomaticPaperCropTrackingPolicy(
+            static_cast<int>(crop.mode),
+            true,
+            tracking,
+            settings.trackingModeProfiles);
+        storeTrackingIntent(settings, tracking, false);
+    }
+
+    // Crop and any required Desk/profile transition are one persisted commit.
+    // If the atomic file replacement fails, restore both the in-memory intent
+    // and the already-rendered crop before issuing any camera command.
+    m_controller->getConfig().setSettings(settings);
+    if (!m_controller->saveConfig()) {
+        m_controller->getConfig().setSettings(previousSettings);
+        if (m_effectsWidget) {
+            m_effectsWidget->applyPaperCropForScene(previousCrop);
+        }
+        if (m_statusLabel) {
+            m_statusLabel->setText(tr(
+                "Could not save paper-crop scene; previous scene retained."));
+        }
+        qWarning() << "MainWindow: paper-crop scene persistence failed; "
+                      "Desk transition cancelled";
+        return;
+    }
+
+    if (requiresDesk) {
+        m_trackingWidget->applyTrackingState(tracking);
+    }
 }
 
 void MainWindow::onSnapshotCaptured(const QImage &image)

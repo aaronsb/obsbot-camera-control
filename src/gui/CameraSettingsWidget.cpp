@@ -145,6 +145,7 @@ CameraSettingsWidget::CameraSettingsWidget(CameraController *controller, QWidget
 
 void CameraSettingsWidget::onHDRToggled(bool checked)
 {
+    emit hdrIntentEdited(checked);
     m_userInitiated = true;
     m_controller->setHDR(checked);
     m_commandTimer->start(1000);
@@ -152,6 +153,7 @@ void CameraSettingsWidget::onHDRToggled(bool checked)
 
 void CameraSettingsWidget::onFOVChanged(int index)
 {
+    emit fovIntentEdited(index);
     m_userInitiated = true;
     m_controller->setFOV(index);
     m_commandTimer->start(1000);
@@ -159,6 +161,7 @@ void CameraSettingsWidget::onFOVChanged(int index)
 
 void CameraSettingsWidget::onFaceAEToggled(bool checked)
 {
+    emit faceAEIntentEdited(checked);
     m_userInitiated = true;
     m_controller->setFaceAE(checked);
     m_commandTimer->start(1000);
@@ -166,6 +169,7 @@ void CameraSettingsWidget::onFaceAEToggled(bool checked)
 
 void CameraSettingsWidget::onFaceFocusToggled(bool checked)
 {
+    emit faceFocusIntentEdited(checked);
     m_userInitiated = true;
     m_controller->setFaceFocus(checked);
     m_commandTimer->start(1000);
@@ -189,11 +193,13 @@ void CameraSettingsWidget::onBrightnessAutoToggled(bool checked)
     }
     // Set auto flag AFTER sending the value
     m_controller->setBrightnessAuto(checked);
+    emit brightnessIntentEdited(checked, m_brightnessSlider->value());
     m_commandTimer->start(1000);
 }
 
 void CameraSettingsWidget::onBrightnessChanged(int value)
 {
+    emit brightnessIntentEdited(m_brightnessAutoCheckBox->isChecked(), value);
     m_userInitiated = true;
     m_controller->setBrightness(value);
     m_commandTimer->start(1000);
@@ -217,11 +223,13 @@ void CameraSettingsWidget::onContrastAutoToggled(bool checked)
     }
     // Set auto flag AFTER sending the value
     m_controller->setContrastAuto(checked);
+    emit contrastIntentEdited(checked, m_contrastSlider->value());
     m_commandTimer->start(1000);
 }
 
 void CameraSettingsWidget::onContrastChanged(int value)
 {
+    emit contrastIntentEdited(m_contrastAutoCheckBox->isChecked(), value);
     m_userInitiated = true;
     m_controller->setContrast(value);
     m_commandTimer->start(1000);
@@ -245,11 +253,13 @@ void CameraSettingsWidget::onSaturationAutoToggled(bool checked)
     }
     // Set auto flag AFTER sending the value
     m_controller->setSaturationAuto(checked);
+    emit saturationIntentEdited(checked, m_saturationSlider->value());
     m_commandTimer->start(1000);
 }
 
 void CameraSettingsWidget::onSaturationChanged(int value)
 {
+    emit saturationIntentEdited(m_saturationAutoCheckBox->isChecked(), value);
     m_userInitiated = true;
     m_controller->setSaturation(value);
     m_commandTimer->start(1000);
@@ -259,6 +269,7 @@ void CameraSettingsWidget::onWhiteBalanceChanged(int index)
 {
     Q_UNUSED(index);
     const int mode = m_whiteBalanceComboBox->currentData().toInt();
+    emit whiteBalanceIntentEdited(mode, m_whiteBalanceKelvinSlider->value());
     updateWhiteBalanceControls(mode);
 
     m_userInitiated = true;
@@ -276,6 +287,9 @@ void CameraSettingsWidget::onWhiteBalanceKelvinChanged(int value)
     if (m_whiteBalanceComboBox->currentData().toInt() != static_cast<int>(Device::DevWhiteBalanceManual)) {
         return;
     }
+
+    emit whiteBalanceIntentEdited(
+        static_cast<int>(Device::DevWhiteBalanceManual), value);
 
     m_userInitiated = true;
     m_controller->setWhiteBalanceManual(value);
@@ -424,6 +438,10 @@ void CameraSettingsWidget::updateWhiteBalanceControls(int mode)
 void CameraSettingsWidget::setV4l2Mode(bool v4l2Only)
 {
     m_advancedGroupBox->setVisible(!v4l2Only);
+    // Tiny 2 focus is owned by the selected tracking-mode profile. Hiding the
+    // legacy editor prevents it from racing the generation-bound profile.
+    m_faceFocusCheckBox->setVisible(
+        !v4l2Only && !m_controller->hasTiny2Capabilities());
 }
 
 void CameraSettingsWidget::updateWhiteBalanceKelvinLabel(int value)

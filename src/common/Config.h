@@ -5,6 +5,7 @@
 #include <map>
 #include <vector>
 #include <array>
+#include "TrackingModeProfile.h"
 
 /**
  * @brief Configuration manager for OBSBOT camera settings
@@ -36,6 +37,19 @@ public:
             double pan;
             double tilt;
             double zoom;
+            bool sceneDefined;
+            bool trackingEnabled;
+            int aiMode;
+            int aiSubMode;
+            bool autoZoom;
+            TrackingFocusPolicy focusPolicy;
+            int manualFocusPosition;
+            int trackSpeed;
+            int paperCropMode;
+            double paperCropLeft;
+            double paperCropTop;
+            double paperCropRight;
+            double paperCropBottom;
         };
 
         bool faceTracking;
@@ -46,12 +60,22 @@ public:
         double zoom;          // 1.0 - 2.0
         double pan;           // -1.0 to 1.0
         double tilt;          // -1.0 to 1.0
+        // Camera-bound intent categories. A camera switch clears categories
+        // whose state cannot be read safely, preventing prior-camera values
+        // from being applied on reconnect.
+        bool panTiltIntentDefined;
+        bool zoomIntentDefined;
+        bool imageIntentDefined;
 
         // AI / Tracking
         int aiMode;           // Device::AiWorkModeType
         int aiSubMode;        // Device::AiSubModeType
         bool autoZoom;        // Enable adaptive auto zoom
         int trackSpeed;       // Device::AiTrackSpeedType
+        // Exact current Tiny 2 intent plus independent defaults for
+        // Group, Human, Hand, Whiteboard, and Desk.
+        TrackingModeProfile activeTrackingProfile;
+        Tiny2TrackingModeProfiles trackingModeProfiles;
 
         // Image controls
         bool brightnessAuto;  // Auto mode for brightness
@@ -69,6 +93,11 @@ public:
 
         // Preview / video
         std::string previewFormat; // Encoded as "widthxheight@fps" or "auto"
+        int paperCropMode;         // 0=Off, 1=Manual, 2=Automatic
+        double paperCropLeft;      // Normalized margin, 0.0-0.45
+        double paperCropTop;
+        double paperCropRight;
+        double paperCropBottom;
 
         std::array<PresetSlot, 3> presets;
 
@@ -140,6 +169,8 @@ private:
     void setDefaults();
     bool parseLine(const std::string &line, int lineNumber, std::vector<ValidationError> &errors);
     bool validateSettings(std::vector<ValidationError> &errors);
+    void migrateTrackingProfiles(
+        const std::map<std::string, std::string> &parsedValues);
     std::string getXdgConfigHome() const;
 };
 

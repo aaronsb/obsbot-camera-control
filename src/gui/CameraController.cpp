@@ -2,13 +2,97 @@
 #include <QThread>
 #include <QDebug>
 #include <algorithm>
+#include <cmath>
+#include <condition_variable>
+#include <mutex>
 
 static constexpr int kDefaultWhiteBalanceKelvin = 4800;
+static constexpr int kSdkDiscoveryGraceMs = 5000;
+static constexpr int kV4l2RescanIntervalMs = 3000;
+
+struct CameraController::DeviceCallbackGate
+    : std::enable_shared_from_this<CameraController::DeviceCallbackGate>
+{
+    struct Lease {
+        Lease() = default;
+        Lease(std::shared_ptr<DeviceCallbackGate> gate,
+              CameraController *controller)
+            : gate(std::move(gate)), controller(controller)
+        {
+        }
+        Lease(const Lease &) = delete;
+        Lease &operator=(const Lease &) = delete;
+        Lease(Lease &&other) noexcept
+            : gate(std::move(other.gate)), controller(other.controller)
+        {
+            other.controller = nullptr;
+        }
+        Lease &operator=(Lease &&) = delete;
+        ~Lease()
+        {
+            if (gate) {
+                gate->release();
+            }
+        }
+
+        CameraController *get() const { return controller; }
+
+        std::shared_ptr<DeviceCallbackGate> gate;
+        CameraController *controller = nullptr;
+    };
+
+    explicit DeviceCallbackGate(CameraController *controller)
+        : controller(controller)
+    {
+    }
+
+    Lease acquire()
+    {
+        std::lock_guard<std::mutex> lock(mutex);
+        if (stopping || !controller) {
+            return {};
+        }
+        ++activeCallbacks;
+        return Lease(shared_from_this(), controller);
+    }
+
+    void stop()
+    {
+        std::lock_guard<std::mutex> lock(mutex);
+        stopping = true;
+        controller = nullptr;
+    }
+
+    void waitForCallbacks()
+    {
+        std::unique_lock<std::mutex> lock(mutex);
+        callbacksDrained.wait(lock, [this]() { return activeCallbacks == 0; });
+    }
+
+private:
+    void release()
+    {
+        std::lock_guard<std::mutex> lock(mutex);
+        --activeCallbacks;
+        if (activeCallbacks == 0) {
+            callbacksDrained.notify_all();
+        }
+    }
+
+    std::mutex mutex;
+    std::condition_variable callbacksDrained;
+    CameraController *controller = nullptr;
+    size_t activeCallbacks = 0;
+    bool stopping = false;
+};
 
 CameraController::CameraController(QObject *parent)
     : QObject(parent)
+    , m_deviceCallbackGate(std::make_shared<DeviceCallbackGate>(this))
     , m_connected(false)
     , m_settlingTimer(nullptr)
+    , m_aiConfirmationTimer(nullptr)
+    , m_autoFramingModeTimer(nullptr)
 {
     m_currentState = {};
     m_cachedState = {};
@@ -22,106 +106,292 @@ CameraController::CameraController(QObject *parent)
     m_settlingTimer = new QTimer(this);
     m_settlingTimer->setSingleShot(true);
 
+    m_aiConfirmationTimer = new QTimer(this);
+    m_aiConfirmationTimer->setInterval(300);
+    connect(m_aiConfirmationTimer, &QTimer::timeout, this, [this]() {
+        if (!m_connected || m_v4l2Only || !m_pendingAiIntent) {
+            m_aiConfirmationTimer->stop();
+            return;
+        }
+        updateState();
+        if (!m_pendingAiIntent) {
+            m_aiConfirmationTimer->stop();
+        } else {
+            m_aiConfirmationTimer->setInterval(
+                m_pendingAiIntent->failureReported ? 1000 : 300);
+        }
+    });
+    connect(m_settlingTimer, &QTimer::timeout, this, [this]() {
+        if (!m_pendingAiIntent || !m_connected || m_v4l2Only) {
+            return;
+        }
+        updateState();
+        if (m_pendingAiIntent) {
+            m_aiConfirmationTimer->setInterval(
+                m_pendingAiIntent->failureReported ? 1000 : 300);
+            m_aiConfirmationTimer->start();
+        }
+    });
+
+    // Meet-series auto-framing has a delayed second step. Keep the timer owned
+    // so a newer manual/off intent can cancel that step deterministically.
+    m_autoFramingModeTimer = new QTimer(this);
+    m_autoFramingModeTimer->setSingleShot(true);
+    connect(m_autoFramingModeTimer, &QTimer::timeout, this, [this]() {
+        if (!m_autoFramingRequested || !m_connected || m_v4l2Only || !m_device) {
+            return;
+        }
+        const bool success = executeCommand("Set AutoFraming mode", [this]() {
+            return m_device->cameraSetAutoFramingModeU(
+                Device::AutoFrmSingle, Device::AutoFrmUpperBody);
+        });
+        m_autoFramingRequested = false;
+        if (success) {
+            emit trackingStateConfirmed(
+                true, m_autoFramingIntentGeneration);
+        } else {
+            emit trackingStateConfirmationFailed(
+                true, m_autoFramingIntentGeneration);
+        }
+    });
+
     resetControlRanges();
 }
 
 CameraController::~CameraController()
 {
+    // The SDK may invoke its callback from another thread. Stop new leases
+    // before unregistering, then drain callbacks that already acquired one so
+    // none can race this object's destruction while queuing a Qt continuation.
+    const auto callbackGate = m_deviceCallbackGate;
+    callbackGate->stop();
+    ++m_connectionGeneration;
+    if (m_deviceCallbackRegistered) {
+        Devices::get().setDevChangedCallback(Devices::devChangedCallback{}, nullptr);
+        m_deviceCallbackRegistered = false;
+    }
+    callbackGate->waitForCallbacks();
+    m_autoFramingRequested = false;
+    if (m_autoFramingModeTimer) {
+        m_autoFramingModeTimer->stop();
+    }
+    if (m_aiConfirmationTimer) {
+        m_aiConfirmationTimer->stop();
+    }
 }
 
 void CameraController::connectToCamera()
 {
-    connectToCamera(QString());
+    // Reconnect to the same physical target. The serial remains authoritative
+    // if /dev/video numbering changes across a disconnect.
+    connectToCamera(m_selectedDevicePath, m_selectedDeviceSerial);
 }
 
-void CameraController::connectToCamera(const QString &devicePath)
+void CameraController::selectCameraTarget(
+    const QString &devicePath, const QString &serialNumber)
 {
     m_selectedDevicePath = devicePath;
+    m_selectedDeviceSerial = serialNumber;
+}
 
-    auto pickDevice = [this](const std::list<std::shared_ptr<Device>> &list)
-        -> std::shared_ptr<Device>
-    {
-        if (list.empty()) return nullptr;
-        if (m_selectedDevicePath.isEmpty()) return list.front();
+void CameraController::connectToCamera(
+    const QString &devicePath, const QString &serialNumber)
+{
+    if (m_connected) {
+        qDebug() << "CameraController: ignoring connect request while already connected to"
+                 << getVideoDevicePath();
+        return;
+    }
+    if (m_v4l2ScanTimer) {
+        m_v4l2ScanTimer->stop();
+    }
 
-        for (const auto &dev : list) {
-            if (QString::fromStdString(dev->videoDevPath()) == m_selectedDevicePath)
-                return dev;
+    selectCameraTarget(devicePath, serialNumber);
+    m_pendingAiIntent.reset();
+    m_pendingTrackingProfile.reset();
+    m_autoFramingRequested = false;
+    ++m_trackingIntentGeneration;
+    m_pendingManualPosition.reset();
+    m_aiStateConfirmed = false;
+    m_manualMovementAuthorized = false;
+    m_autoFramingModeTimer->stop();
+    m_aiConfirmationTimer->stop();
+    const quint64 generation = ++m_connectionGeneration;
+
+    const auto callbackGate = m_deviceCallbackGate;
+    auto onDevChanged = [callbackGate, generation](
+                            std::string devSn, bool connected, void * /*param*/) {
+        // The SDK does not guarantee callback thread affinity. A lease keeps
+        // the QObject alive through invokeMethod(); the QObject context then
+        // owns cancellation of the queued continuation during destruction.
+        auto lease = callbackGate->acquire();
+        CameraController *controller = lease.get();
+        if (!controller) {
+            return;
         }
-        qDebug() << "CameraController: device" << m_selectedDevicePath
-                 << "not found in SDK list, using first available";
-        return list.front();
-    };
-
-    auto onDevChanged = [this, pickDevice](std::string /*dev_sn*/, bool connected, void * /*param*/) {
-        if (connected) {
-            auto dev_list = Devices::get().getDevList();
-            auto dev = pickDevice(dev_list);
-            if (dev) {
-                m_device = dev;
-                m_connected = true;
-                m_cameraInfo.name = QString::fromStdString(m_device->devName());
-                m_cameraInfo.serialNumber = QString::fromStdString(m_device->devSn());
-                m_cameraInfo.version = QString::fromStdString(m_device->devVersion());
-                m_cameraInfo.productType = m_device->productType();
-                m_cameraInfo.connected = true;
-                refreshControlRanges();
-                emit cameraConnected(m_cameraInfo);
-                updateState();
+        const QString changedSerial = QString::fromStdString(devSn);
+        QMetaObject::invokeMethod(controller, [controller, generation, changedSerial, connected]() {
+            if (controller->m_connectionGeneration != generation) {
+                return;
             }
-        } else {
-            m_connected = false;
-            m_cameraInfo.connected = false;
-            resetControlRanges();
-            emit cameraDisconnected();
-        }
+            if (!connected && !changedSerial.isEmpty()
+                && !controller->m_cameraInfo.serialNumber.isEmpty()
+                && changedSerial != controller->m_cameraInfo.serialNumber) {
+                return;
+            }
+
+            if (connected) {
+                if (!controller->m_connected) {
+                    controller->tryConnectSdkDevice();
+                }
+            } else if (controller->m_connected && !controller->m_v4l2Only) {
+                controller->m_device.reset();
+                controller->m_connected = false;
+                controller->m_cameraInfo.connected = false;
+                controller->m_pendingAiIntent.reset();
+                controller->m_pendingTrackingProfile.reset();
+                ++controller->m_trackingIntentGeneration;
+                controller->m_pendingManualPosition.reset();
+                controller->m_aiStateConfirmed = false;
+                controller->m_manualMovementAuthorized = false;
+                controller->m_autoFramingRequested = false;
+                controller->m_autoFramingModeTimer->stop();
+                controller->m_aiConfirmationTimer->stop();
+                controller->m_settlingTimer->stop();
+                controller->resetControlRanges();
+                emit controller->cameraDisconnected();
+                // Give the SDK a fresh chance to report a transient reconnect
+                // before considering the reduced-capability V4L2 backend.
+                controller->tryV4l2Fallback();
+            }
+        }, Qt::QueuedConnection);
     };
 
     Devices::get().setDevChangedCallback(onDevChanged, nullptr);
+    m_deviceCallbackRegistered = true;
     Devices::get().setEnableMdnsScan(false);
 
-    auto dev_list = Devices::get().getDevList();
-    if (!dev_list.empty() && !m_connected) {
-        auto dev = pickDevice(dev_list);
-        if (dev) {
-            m_device = dev;
-            m_connected = true;
-            m_cameraInfo.name = QString::fromStdString(m_device->devName());
-            m_cameraInfo.serialNumber = QString::fromStdString(m_device->devSn());
-            m_cameraInfo.version = QString::fromStdString(m_device->devVersion());
-            m_cameraInfo.productType = m_device->productType();
-            m_cameraInfo.connected = true;
-            refreshControlRanges();
-            emit cameraConnected(m_cameraInfo);
-            updateState();
-        }
-    } else {
+    if (!tryConnectSdkDevice()) {
         tryV4l2Fallback();
     }
 }
 
+std::shared_ptr<Device> CameraController::selectedSdkDevice() const
+{
+    const auto devices = Devices::get().getDevList();
+    if (devices.empty()) {
+        return nullptr;
+    }
+    if (!m_selectedDeviceSerial.isEmpty()) {
+        for (const auto &device : devices) {
+            if (QString::fromStdString(device->devSn())
+                == m_selectedDeviceSerial) {
+                return device;
+            }
+        }
+        return nullptr;
+    }
+    if (m_selectedDevicePath.isEmpty()) {
+        return devices.front();
+    }
+
+    for (const auto &device : devices) {
+        if (QString::fromStdString(device->videoDevPath())
+            == m_selectedDevicePath) {
+            return device;
+        }
+    }
+    // Exact selection is a safety boundary: never direct PTZ commands to an
+    // arbitrary first camera while the requested camera is still discovering.
+    return nullptr;
+}
+
+bool CameraController::connectSdkDevice(
+    const std::shared_ptr<Device> &device)
+{
+    if (m_connected) {
+        return !m_v4l2Only;
+    }
+    if (!device) {
+        return false;
+    }
+
+    if (m_v4l2ScanTimer) {
+        m_v4l2ScanTimer->stop();
+    }
+    m_device = device;
+    m_v4l2Only = false;
+    m_v4l2DevicePath.clear();
+    m_connected = true;
+    m_manualMovementAuthorized = false;
+    m_currentState.panTiltKnown = false;
+    m_currentState.zoomKnown = false;
+    m_currentState.imageSettingsKnown = false;
+    m_cameraInfo.name = QString::fromStdString(device->devName());
+    m_cameraInfo.serialNumber = QString::fromStdString(device->devSn());
+    m_selectedDevicePath = QString::fromStdString(device->videoDevPath());
+    m_selectedDeviceSerial = m_cameraInfo.serialNumber;
+    m_cameraInfo.version = QString::fromStdString(device->devVersion());
+    m_cameraInfo.productType = device->productType();
+    m_cameraInfo.connected = true;
+    refreshControlRanges();
+    qInfo() << "CameraController: connected through SDK"
+            << QString::fromStdString(device->videoDevPath())
+            << m_cameraInfo.serialNumber;
+    emit cameraConnected(m_cameraInfo);
+    updateState();
+    return true;
+}
+
+bool CameraController::tryConnectSdkDevice()
+{
+    return connectSdkDevice(selectedSdkDevice());
+}
+
 void CameraController::tryV4l2Fallback()
 {
-    auto path = V4l2Backend::findObsbotDevice();
-    if (!path.empty()) {
-        connectV4l2(path);
+    if (m_connected) {
         return;
     }
 
+    m_v4l2FallbackGeneration = m_connectionGeneration;
     if (!m_v4l2ScanTimer) {
         m_v4l2ScanTimer = new QTimer(this);
         m_v4l2ScanTimer->setSingleShot(false);
         connect(m_v4l2ScanTimer, &QTimer::timeout, this, [this]() {
-            if (m_connected)
-                return;
-            auto path = V4l2Backend::findObsbotDevice();
-            if (!path.empty()) {
+            if (m_v4l2FallbackGeneration != m_connectionGeneration
+                || m_connected) {
                 m_v4l2ScanTimer->stop();
+                return;
+            }
+
+            // A device callback can be queued at the same time as this timer.
+            // Re-read the SDK list before probing fallback so an available
+            // exact SDK target wins this arbitration point.
+            if (tryConnectSdkDevice()) {
+                return;
+            }
+
+            // A serial-bound target must never fall back by pathname: Linux
+            // may reuse /dev/videoN for another physical camera after hotplug.
+            std::string path;
+            if (m_selectedDeviceSerial.isEmpty()) {
+                path = m_selectedDevicePath.isEmpty()
+                    ? V4l2Backend::findObsbotDevice()
+                    : m_selectedDevicePath.toStdString();
+            }
+            if (!path.empty()) {
                 connectV4l2(path);
+            }
+            if (!m_connected) {
+                m_v4l2ScanTimer->setInterval(kV4l2RescanIntervalMs);
             }
         });
     }
-    m_v4l2ScanTimer->start(3000);
+    // Do not synchronously claim /dev/video* while the SDK discovery callback
+    // is queued on the Qt event loop. V4L2 remains a bounded fallback only.
+    m_v4l2ScanTimer->setInterval(kSdkDiscoveryGraceMs);
+    m_v4l2ScanTimer->start();
 }
 
 void CameraController::connectV4l2(const std::string &devicePath)
@@ -129,10 +399,28 @@ void CameraController::connectV4l2(const std::string &devicePath)
     if (!m_v4l2.open(devicePath))
         return;
 
+    // Close the final probe and prefer an SDK device that appeared while the
+    // V4L2 path was being opened. Keeping the shared Device candidate removes
+    // a second list lookup from this last arbitration point.
+    if (const auto sdkDevice = selectedSdkDevice()) {
+        m_v4l2.close();
+        connectSdkDevice(sdkDevice);
+        return;
+    }
+
+    if (m_v4l2ScanTimer) {
+        m_v4l2ScanTimer->stop();
+    }
+    if (m_deviceCallbackRegistered) {
+        Devices::get().setDevChangedCallback(Devices::devChangedCallback{}, nullptr);
+        m_deviceCallbackRegistered = false;
+    }
+    ++m_connectionGeneration;
     Devices::get().close();
 
     m_connected = true;
     m_v4l2Only = true;
+    m_manualMovementAuthorized = false;
     m_v4l2DevicePath = QString::fromStdString(devicePath);
 
     std::string card = m_v4l2.cardName();
@@ -148,10 +436,11 @@ void CameraController::connectV4l2(const std::string &devicePath)
     m_cameraInfo.connected = true;
 
     refreshV4l2ControlRanges();
+    qWarning() << "CameraController: SDK discovery grace expired; using fail-closed V4L2 fallback"
+               << m_v4l2DevicePath;
 
-    m_v4l2.setWhiteBalanceAuto(false);
-    m_v4l2.setWhiteBalanceTemperature(kDefaultWhiteBalanceKelvin);
-
+    // Do not write discovery-time defaults. onCameraConnected() applies the
+    // explicit Config intent; until then this backend remains observational.
     emit cameraConnected(m_cameraInfo);
     updateV4l2State();
 }
@@ -186,11 +475,13 @@ void CameraController::updateV4l2State()
         ? static_cast<int>(Device::DevWhiteBalanceAuto)
         : static_cast<int>(Device::DevWhiteBalanceManual);
     m_currentState.whiteBalanceKelvin = m_v4l2.getWhiteBalanceTemperature();
+    m_currentState.imageSettingsKnown = true;
 
     auto zoomRange = m_v4l2.getZoomRange();
     int zoomMax = zoomRange.valid ? zoomRange.max : 100;
     int zoomRaw = m_v4l2.getZoomAbsolute();
     m_currentState.zoom = (zoomMax > 0) ? (static_cast<double>(zoomRaw) / zoomMax + 1.0) : 1.0;
+    m_currentState.zoomKnown = zoomRange.valid && zoomMax > 0;
 
     auto panRange = m_v4l2.getPanRange();
     auto tiltRange = m_v4l2.getTiltRange();
@@ -198,6 +489,9 @@ void CameraController::updateV4l2State()
         m_currentState.pan = static_cast<double>(m_v4l2.getPanAbsolute()) / panRange.max;
     if (tiltRange.valid && tiltRange.max != 0)
         m_currentState.tilt = static_cast<double>(m_v4l2.getTiltAbsolute()) / tiltRange.max;
+    m_currentState.panTiltKnown =
+        panRange.valid && panRange.max != 0
+        && tiltRange.valid && tiltRange.max != 0;
 
     m_currentState.autoFocusEnabled = m_v4l2.getAutoFocus();
     m_currentState.manualFocusValue = m_v4l2.getFocusAbsolute();
@@ -207,13 +501,32 @@ void CameraController::updateV4l2State()
 
 void CameraController::disconnectFromCamera()
 {
+    ++m_connectionGeneration;
+    if (m_deviceCallbackRegistered) {
+        Devices::get().setDevChangedCallback(Devices::devChangedCallback{}, nullptr);
+        m_deviceCallbackRegistered = false;
+    }
+    m_pendingAiIntent.reset();
+    m_autoFramingRequested = false;
+    m_pendingTrackingProfile.reset();
+    ++m_trackingIntentGeneration;
+    m_pendingManualPosition.reset();
+    m_aiStateConfirmed = false;
+    m_manualMovementAuthorized = false;
+    m_autoFramingModeTimer->stop();
+    m_aiConfirmationTimer->stop();
+    m_settlingTimer->stop();
+    if (m_v4l2ScanTimer) {
+        m_v4l2ScanTimer->stop();
+    }
+
     if (m_connected) {
         if (m_v4l2Only) {
             m_v4l2.close();
             m_v4l2Only = false;
-        } else {
-            m_device.reset();
+            m_v4l2DevicePath.clear();
         }
+        m_device.reset();
         m_connected = false;
         m_cameraInfo.connected = false;
         resetControlRanges();
@@ -260,63 +573,243 @@ bool CameraController::hasTiny2Capabilities() const
     return isTiny2Family();
 }
 
-bool CameraController::enableAutoFraming(bool enabled)
+bool CameraController::enterAutoFramingMediaMode()
 {
-    if (!m_connected || m_v4l2Only) return false;
+    // cameraSetMediaModeU is a Meet-series API. Tiny tracking families use
+    // their dedicated AI protocols.
+    if (!m_connected || m_v4l2Only || !isMeetFamily()) return false;
 
-    if (enabled) {
-        // Step 1: Set MediaMode to AutoFrame
-        if (!executeCommand("Set MediaMode to AutoFrame", [this]() {
-            return m_device->cameraSetMediaModeU(Device::MediaModeAutoFrame);
-        })) {
-            return false;
-        }
-
-        // Step 2: Set auto-framing mode after a brief delay (non-blocking)
-        QTimer::singleShot(500, [this]() {
-            executeCommand("Set AutoFraming mode", [this]() {
-                return m_device->cameraSetAutoFramingModeU(Device::AutoFrmSingle, Device::AutoFrmUpperBody);
-            });
-        });
-
-        // Restore auto focus when auto-framing is enabled
-        setFocusAbsolute(0, true);
-
+    const bool success = executeCommand("Set MediaMode to AutoFrame", [this]() {
+        return m_device->cameraSetMediaModeU(Device::MediaModeAutoFrame);
+    });
+    if (success) {
+        setFocusAbsoluteUnchecked(0, true);
         m_currentState.autoFramingEnabled = true;
         emit stateChanged(m_currentState);
-        return true;  // First command succeeded, second is pending
-    } else {
-        bool success = executeCommand("Disable AutoFraming", [this]() {
-            return m_device->cameraSetMediaModeU(Device::MediaModeNormal);
-        });
-        if (success) {
-            // Switch to manual focus when auto-framing is disabled
-            setFocusAbsolute(m_currentState.manualFocusValue, false);
-
-            m_currentState.autoFramingEnabled = false;
-            emit stateChanged(m_currentState);
-        }
-        return success;
     }
+    return success;
+}
+
+bool CameraController::enableAutoFraming(bool enabled)
+{
+    if (!m_connected || m_v4l2Only || !isMeetFamily()) return false;
+
+    // Any ownership transition revokes raw movement immediately. Only the
+    // complete tracking-off transaction may grant it again.
+    m_manualMovementAuthorized = false;
+    m_autoFramingRequested = enabled;
+    m_autoFramingModeTimer->stop();
+
+    if (enabled) {
+        // Meet-series enable is a cancellable two-step transition.
+        if (!enterAutoFramingMediaMode()) {
+            m_autoFramingRequested = false;
+            return false;
+        }
+        m_autoFramingModeTimer->start(500);
+        return true;
+    }
+
+    const bool success = executeCommand("Disable AutoFraming", [this]() {
+        return m_device->cameraSetMediaModeU(Device::MediaModeNormal);
+    });
+    if (success) {
+        // Preserve the legacy immediate focus restoration. setTrackingState()
+        // follows with the caller's exact retained snapshot before authorizing
+        // movement.
+        setFocusAbsoluteUnchecked(m_currentState.manualFocusValue, false);
+        m_currentState.autoFramingEnabled = false;
+        emit stateChanged(m_currentState);
+    }
+    return success;
 }
 
 bool CameraController::setAiMode(int mode, int subMode)
 {
     if (!m_connected || m_v4l2Only) return false;
 
-    auto workMode = static_cast<Device::AiWorkModeType>(mode);
-    bool success = executeCommand("Set AI Mode", [this, workMode, subMode]() {
+    const auto previousIntent = m_pendingAiIntent;
+    const int previousMode = m_currentState.aiMode;
+    const int previousSubMode = m_currentState.aiSubMode;
+    const bool previousTracking = m_currentState.autoFramingEnabled;
+    const bool previousAiStateConfirmed = m_aiStateConfirmed;
+    const bool confirmationWasActive = m_aiConfirmationTimer->isActive();
+    m_aiConfirmationTimer->stop();
+
+    const bool previousModeTracks = previousMode > Device::AiWorkModeNone
+        && previousMode <= Device::AiWorkModeDesk;
+    const bool requestedModeTracks = mode > Device::AiWorkModeNone
+        && mode <= Device::AiWorkModeDesk;
+    const int failSafeMode = previousModeTracks
+        ? previousMode
+        : (requestedModeTracks ? mode : Device::AiWorkModeHuman);
+    const int failSafeSubMode = failSafeMode == Device::AiWorkModeHuman
+        ? (previousMode == Device::AiWorkModeHuman ? previousSubMode
+           : (mode == Device::AiWorkModeHuman ? subMode : Device::AiSubModeNormal))
+        : 0;
+
+    m_pendingAiIntent = PendingAiIntent{
+        mode, subMode, failSafeMode, failSafeSubMode,
+        m_trackingIntentGeneration};
+    m_aiStateConfirmed = false;
+    m_manualMovementAuthorized = false;
+    const auto workMode = static_cast<Device::AiWorkModeType>(mode);
+    const bool success = executeCommand("Set AI Mode", [this, workMode, subMode]() {
         return m_device->cameraSetAiModeU(workMode, subMode);
     });
 
-    if (success) {
-        m_currentState.aiMode = mode;
-        m_currentState.aiSubMode = subMode;
-        m_currentState.autoFramingEnabled = (mode != Device::AiWorkModeNone);
-        emit stateChanged(m_currentState);
+    if (!success) {
+        m_pendingAiIntent = previousIntent;
+        if (m_pendingAiIntent) {
+            // A superseding controller intent already invalidated the older
+            // token. Resume confirmation under the current generation so an
+            // older completion cannot become authoritative again.
+            m_pendingAiIntent->intentGeneration = m_trackingIntentGeneration;
+        }
+        m_currentState.aiMode = previousMode;
+        m_currentState.aiSubMode = previousSubMode;
+        m_currentState.autoFramingEnabled = previousTracking;
+        m_aiStateConfirmed = previousAiStateConfirmed;
+        if (previousIntent && confirmationWasActive) {
+            m_aiConfirmationTimer->start();
+        }
+        return false;
     }
 
-    return success;
+    // Publish the requested state immediately, but keep the pending intent
+    // until the SDK's lagging cameraStatus() cache confirms it.
+    m_currentState.aiMode = mode;
+    m_currentState.aiSubMode = subMode;
+    m_currentState.autoFramingEnabled = (mode != Device::AiWorkModeNone);
+    emit stateChanged(m_currentState);
+    beginSettling(3000);
+    return true;
+}
+
+CameraController::TrackingTransitionResult CameraController::setTrackingState(
+    bool enabled, int aiMode, int aiSubMode,
+    const TrackingModeProfile &profile)
+{
+    if (!m_connected || m_v4l2Only) {
+        return {false, false, false, m_trackingIntentGeneration};
+    }
+    if (!isValidTrackingModeProfile(profile)
+        || (!enabled
+            && (profile.focusPolicy != TrackingFocusPolicy::Manual
+                || profile.autoZoom))) {
+        emit commandFailed("Invalid tracking profile", -1);
+        return {false, false, false, m_trackingIntentGeneration};
+    }
+
+    const quint64 intentGeneration = ++m_trackingIntentGeneration;
+    m_pendingManualPosition.reset();
+    m_pendingTrackingProfile.reset();
+    m_manualMovementAuthorized = false;
+    emit trackingIntentStarted(intentGeneration);
+    const auto reportSynchronousFailure = [this, intentGeneration]() {
+        const bool observedTracking = isTiny2Family()
+            ? m_currentState.aiMode != Device::AiWorkModeNone
+            : m_currentState.autoFramingEnabled;
+        emit trackingStateConfirmationFailed(
+            observedTracking, intentGeneration);
+    };
+
+    if (isOriginalTinyFamily()) {
+        m_pendingAiIntent.reset();
+        const bool modeApplied = executeCommand(
+            enabled ? "Enable AI Tracking" : "Disable AI Tracking",
+            [this, enabled]() { return m_device->aiSetTargetSelectR(enabled); });
+        const bool profileApplied = modeApplied
+            && (enabled || applyTrackingProfile(profile, false));
+        if (modeApplied) {
+            m_currentState.autoFramingEnabled = enabled;
+            m_currentState.aiMode = enabled
+                ? Device::AiWorkModeHuman : Device::AiWorkModeNone;
+            emit stateChanged(m_currentState);
+        }
+        if (profileApplied) {
+            m_manualMovementAuthorized = !enabled;
+            emit trackingStateConfirmed(enabled, intentGeneration);
+        } else {
+            reportSynchronousFailure();
+        }
+        return {
+            modeApplied, profileApplied, false, intentGeneration
+        };
+    }
+
+    if (isMeetFamily()) {
+        m_pendingAiIntent.reset();
+        m_autoFramingIntentGeneration = intentGeneration;
+        const bool modeApplied = enableAutoFraming(enabled);
+        const bool profileApplied = modeApplied
+            && (enabled || applyTrackingProfile(profile, false));
+        const bool confirmationPending = enabled && modeApplied;
+        if (confirmationPending) {
+            emit trackingStateConfirmationPending(
+                enabled, intentGeneration);
+        } else if (profileApplied) {
+            m_manualMovementAuthorized = true;
+            emit trackingStateConfirmed(false, intentGeneration);
+        } else {
+            reportSynchronousFailure();
+        }
+        return {
+            modeApplied, profileApplied, confirmationPending,
+            intentGeneration
+        };
+    }
+
+    if (!isTiny2Family()) {
+        emit commandFailed("Tracking is unsupported for this camera", -1);
+        reportSynchronousFailure();
+        return {false, false, false, intentGeneration};
+    }
+
+    if (m_pendingAiIntent) {
+        m_pendingAiIntent->intentGeneration = intentGeneration;
+    }
+    m_pendingTrackingProfile = PendingTrackingProfile{
+        profile, intentGeneration};
+
+    int targetMode = enabled ? aiMode : Device::AiWorkModeNone;
+    if (enabled && targetMode == Device::AiWorkModeNone) {
+        targetMode = Device::AiWorkModeHuman;
+    }
+    const int targetSubMode = targetMode == Device::AiWorkModeHuman ? aiSubMode : 0;
+
+    // Auto zoom is the pre-mode part of the same profile transaction. Speed
+    // and focus wait for a fresh exact mode confirmation below.
+    const bool previousAutoZoom = m_currentState.autoZoomEnabled;
+    const bool targetAutoZoom = enabled && profile.autoZoom;
+    const bool autoZoomApplied = setAutoZoom(targetAutoZoom);
+    if (!autoZoomApplied) {
+        m_pendingTrackingProfile.reset();
+        const bool confirmationPending = m_pendingAiIntent.has_value();
+        if (!confirmationPending) {
+            reportSynchronousFailure();
+        }
+        return {false, false, confirmationPending, intentGeneration};
+    }
+
+    const bool modeApplied = setAiMode(targetMode, targetSubMode);
+    if (!modeApplied) {
+        m_pendingTrackingProfile.reset();
+        const bool rollbackApplied = setAutoZoom(previousAutoZoom);
+        const bool confirmationPending = m_pendingAiIntent.has_value();
+        if (!rollbackApplied) {
+            emit trackingStateConfirmationUncertain(intentGeneration);
+        }
+        if (!confirmationPending) {
+            reportSynchronousFailure();
+        }
+        return {
+            false, rollbackApplied, confirmationPending, intentGeneration
+        };
+    }
+
+    emit trackingStateConfirmationPending(enabled, intentGeneration);
+    return {true, true, true, intentGeneration};
 }
 
 bool CameraController::setAutoZoom(bool enabled)
@@ -352,6 +845,44 @@ bool CameraController::setTrackSpeed(int speedMode)
     return success;
 }
 
+bool CameraController::applyTrackingProfile(
+    const TrackingModeProfile &profile, bool trackingEnabled)
+{
+    if (!isValidTrackingModeProfile(profile)) {
+        emit commandFailed("Invalid tracking profile", -1);
+        return false;
+    }
+
+    bool speedApplied = true;
+    if (trackingEnabled) {
+        speedApplied = setTrackSpeed(profile.trackSpeed);
+    }
+
+    bool firstFocusCommand = false;
+    bool secondFocusCommand = false;
+    switch (profile.focusPolicy) {
+    case TrackingFocusPolicy::Face:
+        // General autofocus supplies the focus motor behavior; face focus then
+        // selects the face as the preferred target.
+        firstFocusCommand = setFocusAbsoluteUnchecked(
+            profile.manualFocusPosition, true);
+        secondFocusCommand = setFaceFocus(true);
+        break;
+    case TrackingFocusPolicy::Continuous:
+        firstFocusCommand = setFaceFocus(false);
+        secondFocusCommand = setFocusAbsoluteUnchecked(
+            profile.manualFocusPosition, true);
+        break;
+    case TrackingFocusPolicy::Manual:
+        firstFocusCommand = setFaceFocus(false);
+        secondFocusCommand = setFocusAbsoluteUnchecked(
+            profile.manualFocusPosition, false);
+        break;
+    }
+
+    return speedApplied && firstFocusCommand && secondFocusCommand;
+}
+
 bool CameraController::setAudioAutoGain(bool enabled)
 {
     if (!m_connected || m_v4l2Only) return false;
@@ -368,29 +899,30 @@ bool CameraController::setAudioAutoGain(bool enabled)
     return success;
 }
 
+bool CameraController::canApplyManualMovement() const
+{
+    return m_connected && !m_v4l2Only && m_device
+        && m_manualMovementAuthorized;
+}
+
 bool CameraController::setPanTilt(double pan, double tilt)
 {
-    if (!m_connected) return false;
+    // V4L2 cannot confirm that autonomous tracking released gimbal ownership.
+    // Enforce the fail-closed invariant at the transport boundary as well as
+    // in the widget so no future caller can bypass it.
+    if (!canApplyManualMovement()) return false;
 
     pan = qBound(-1.0, pan, 1.0);
     tilt = qBound(-1.0, tilt, 1.0);
 
-    bool success;
-    if (m_v4l2Only) {
-        auto panRange = m_v4l2.getPanRange();
-        auto tiltRange = m_v4l2.getTiltRange();
-        int panVal = static_cast<int>(pan * panRange.max);
-        int tiltVal = static_cast<int>(tilt * tiltRange.max);
-        success = m_v4l2.setPanAbsolute(panVal) && m_v4l2.setTiltAbsolute(tiltVal);
-    } else {
-        success = executeCommand("Set Pan/Tilt", [this, pan, tilt]() {
-            return m_device->cameraSetPanTiltAbsolute(pan, tilt);
-        });
-    }
+    const bool success = executeCommand("Set Pan/Tilt", [this, pan, tilt]() {
+        return m_device->cameraSetPanTiltAbsolute(pan, tilt);
+    });
 
     if (success) {
         m_currentState.pan = pan;
         m_currentState.tilt = tilt;
+        m_currentState.panTiltKnown = true;
         emit stateChanged(m_currentState);
     }
 
@@ -411,25 +943,21 @@ bool CameraController::adjustTilt(double delta)
 
 bool CameraController::setZoom(double zoom)
 {
-    if (!m_connected) return false;
+    if (!canApplyManualMovement()) return false;
 
     zoom = qBound(1.0, zoom, 2.0);
 
-    bool success;
-    if (m_v4l2Only) {
-        auto zoomRange = m_v4l2.getZoomRange();
-        int zoomMax = zoomRange.valid ? zoomRange.max : 100;
-        int v4l2Zoom = static_cast<int>((zoom - 1.0) * zoomMax);
-        success = m_v4l2.setZoomAbsolute(v4l2Zoom);
-    } else {
-        uint32_t zoomRatio = static_cast<uint32_t>(zoom * 100);
-        success = executeCommand("Set Zoom", [this, zoomRatio]() {
-            return m_device->cameraSetZoomWithSpeedAbsoluteR(zoomRatio, 255);
-        });
-    }
+    const float normalizedZoom = static_cast<float>(zoom);
+    const bool success = executeCommand("Set Zoom", [this, normalizedZoom]() {
+        // This SDK API accepts the same normalized 1.0-2.0 contract as Config
+        // and the UI. The speed API is device-specific and was observed to
+        // acknowledge Tiny 2 commands without changing zoom.
+        return m_device->cameraSetZoomAbsoluteR(normalizedZoom);
+    });
 
     if (success) {
         m_currentState.zoom = zoom;
+        m_currentState.zoomKnown = true;
         emit stateChanged(m_currentState);
     }
 
@@ -480,25 +1008,31 @@ bool CameraController::setFaceFocus(bool enabled)
 {
     if (!m_connected || m_v4l2Only) return false;
 
-    return executeCommand(enabled ? "Enable Face Focus" : "Disable Face Focus", [this, enabled]() {
-        return m_device->cameraSetFaceFocusR(enabled);
-    });
+    const bool success = executeCommand(
+        enabled ? "Enable Face Focus" : "Disable Face Focus",
+        [this, enabled]() { return m_device->cameraSetFaceFocusR(enabled); });
+    if (success) {
+        m_currentState.faceFocusEnabled = enabled;
+        emit stateChanged(m_currentState);
+    }
+    return success;
 }
 
 bool CameraController::setFocusAbsolute(int position, bool autoFocus)
 {
-    if (!m_connected) return false;
+    if (!canApplyManualMovement()) return false;
+    return setFocusAbsoluteUnchecked(position, autoFocus);
+}
+
+bool CameraController::setFocusAbsoluteUnchecked(
+    int position, bool autoFocus)
+{
+    if (!m_connected || m_v4l2Only || !m_device) return false;
     position = qBound(0, position, 100);
 
-    bool success;
-    if (m_v4l2Only) {
-        m_v4l2.setAutoFocus(autoFocus);
-        success = autoFocus || m_v4l2.setFocusAbsolute(position);
-    } else {
-        success = executeCommand("Set Focus", [this, position, autoFocus]() {
-            return m_device->cameraSetFocusAbsolute(position, autoFocus);
-        });
-    }
+    const bool success = executeCommand("Set Focus", [this, position, autoFocus]() {
+        return m_device->cameraSetFocusAbsolute(position, autoFocus);
+    });
     if (success) {
         m_currentState.autoFocusEnabled = autoFocus;
         m_currentState.manualFocusValue = position;
@@ -701,16 +1235,162 @@ void CameraController::updateState()
     }
 
     auto status = m_device->cameraStatus();
+    bool freshStatusRead = false;
+    if (isTiny2Family()) {
+        Device::CameraStatus freshStatus{};
+        if (m_device->cameraGetCameraStatusU(freshStatus) == 0) {
+            status = freshStatus;
+            freshStatusRead = true;
+        }
+    }
 
-    m_currentState.aiMode = status.tiny.ai_mode;
-    m_currentState.aiSubMode = status.tiny.ai_sub_mode;
+    const int reportedAiMode = status.tiny.ai_mode;
+    const int reportedAiSubMode = status.tiny.ai_sub_mode;
+    const bool reportedModeIsStable = reportedAiMode >= Device::AiWorkModeNone
+        && reportedAiMode <= Device::AiWorkModeDesk;
+    if (m_pendingAiIntent) {
+        const bool modeMatches = reportedAiMode == m_pendingAiIntent->mode;
+        const bool subModeMatches = m_pendingAiIntent->mode != Device::AiWorkModeHuman
+            || reportedAiSubMode == m_pendingAiIntent->subMode;
+        if (freshStatusRead && modeMatches && subModeMatches) {
+            const quint64 intentGeneration =
+                m_pendingAiIntent->intentGeneration;
+            const bool trackingEnabled =
+                reportedAiMode != Device::AiWorkModeNone;
+            const bool hasMatchingProfile = m_pendingTrackingProfile
+                && m_pendingTrackingProfile->intentGeneration
+                    == intentGeneration;
+            const TrackingModeProfile profile = hasMatchingProfile
+                ? m_pendingTrackingProfile->profile
+                : TrackingModeProfile{};
+
+            m_currentState.aiMode = reportedAiMode;
+            m_currentState.aiSubMode = reportedAiSubMode;
+            m_pendingAiIntent.reset();
+            m_pendingTrackingProfile.reset();
+            m_aiStateConfirmed = true;
+
+            // Focus and speed are allowed only after this fresh exact mode
+            // confirmation. The terminal tracking signal now means the whole
+            // profile transaction—not merely the AI mode—has completed.
+            const bool profileApplied = hasMatchingProfile
+                && applyTrackingProfile(profile, trackingEnabled);
+            if (profileApplied) {
+                // The off confirmation is not terminal until face focus is
+                // disabled and the retained manual snapshot has succeeded.
+                m_manualMovementAuthorized = !trackingEnabled;
+                emit trackingStateConfirmed(
+                    trackingEnabled, intentGeneration);
+                if (!trackingEnabled) {
+                    schedulePendingManualPosition();
+                }
+            } else {
+                m_manualMovementAuthorized = false;
+                m_pendingManualPosition.reset();
+                emit trackingStateConfirmationFailed(
+                    trackingEnabled, intentGeneration);
+                if (!hasMatchingProfile) {
+                    emit commandFailed("Apply Tracking Profile", -1);
+                }
+            }
+        } else {
+            PendingAiIntent &intent = *m_pendingAiIntent;
+            ++intent.confirmationAttempts;
+            if (freshStatusRead && reportedModeIsStable
+                && (intent.confirmationAttempts >= 3 || intent.failureReported)) {
+                const bool failureAlreadyReported = intent.failureReported;
+                const quint64 intentGeneration = intent.intentGeneration;
+                m_currentState.aiMode = reportedAiMode;
+                m_currentState.aiSubMode = reportedAiSubMode;
+                m_pendingAiIntent.reset();
+                m_aiStateConfirmed = true;
+                m_manualMovementAuthorized = false;
+                m_pendingManualPosition.reset();
+                m_pendingTrackingProfile.reset();
+                emit trackingStateConfirmationFailed(
+                    reportedAiMode != Device::AiWorkModeNone,
+                    intentGeneration);
+                if (!failureAlreadyReported) {
+                    emit commandFailed("Confirm AI Mode", -1);
+                }
+            } else if (intent.confirmationAttempts >= 3) {
+                // A failed fresh read or a transitional/sentinel mode is not
+                // evidence that AI released the gimbal. Keep retrying fresh
+                // reads, but fail closed until a stable mode is observed.
+                m_currentState.aiMode = intent.failSafeMode;
+                m_currentState.aiSubMode = intent.failSafeSubMode;
+                m_aiStateConfirmed = false;
+                m_manualMovementAuthorized = false;
+                if (!intent.failureReported) {
+                    intent.failureReported = true;
+                    emit trackingStateConfirmationUncertain(
+                        intent.intentGeneration);
+                    emit commandFailed("Confirm AI Mode", -1);
+                }
+            }
+        }
+        // Until a successful fresh read confirms or rejects the intent, retain
+        // explicit operator intent (or the conservative tracking-on fallback).
+    } else if (!isTiny2Family() || freshStatusRead) {
+        if (reportedModeIsStable) {
+            m_currentState.aiMode = reportedAiMode;
+            m_currentState.aiSubMode = reportedAiSubMode;
+            if (isTiny2Family()) {
+                // A fresh unsolicited observation may update displayed state,
+                // but it is not completion evidence for an already-resolved
+                // controller intent and therefore carries no generation token.
+                const bool trackingEnabled =
+                    reportedAiMode != Device::AiWorkModeNone;
+                m_aiStateConfirmed = true;
+                bool ownershipReady = trackingEnabled;
+                if (trackingEnabled) {
+                    m_manualMovementAuthorized = false;
+                } else if (m_manualMovementAuthorized) {
+                    ownershipReady = true;
+                } else {
+                    TrackingModeProfile manualProfile =
+                        m_config.getSettings().activeTrackingProfile;
+                    manualProfile.focusPolicy = TrackingFocusPolicy::Manual;
+                    manualProfile.autoZoom = false;
+                    ownershipReady = applyTrackingProfile(
+                        manualProfile, false);
+                    m_manualMovementAuthorized = ownershipReady;
+                }
+                if (ownershipReady) {
+                    emit trackingOwnershipObserved(trackingEnabled);
+                }
+            }
+        } else {
+            qDebug() << "CameraController: ignoring transitional AI mode"
+                     << reportedAiMode;
+        }
+    }
+    // A failed Tiny 2 fresh-status read never falls back to the SDK's lagging
+    // cameraStatus() cache for AI ownership.
     m_currentState.zoomRatio = status.tiny.zoom_ratio;
     // Derive zoom float from zoom_ratio (100 = 1.0x, 200 = 2.0x)
     if (status.tiny.zoom_ratio >= 100 && status.tiny.zoom_ratio <= 200) {
         m_currentState.zoom = status.tiny.zoom_ratio / 100.0;
+        m_currentState.zoomKnown = !isTiny2Family() || freshStatusRead;
     } else {
+        m_currentState.zoomKnown = false;
         qDebug() << "CameraController: unexpected zoom_ratio" << status.tiny.zoom_ratio
                  << "— keeping previous zoom" << m_currentState.zoom;
+    }
+
+    if (isTiny2Family()) {
+        Device::AiGimbalStateInfo gimbal{};
+        if (m_device->aiGetGimbalStateR(&gimbal) == 0
+            && std::isfinite(gimbal.yaw_motor)
+            && std::isfinite(gimbal.pitch_motor)) {
+            m_currentState.pan = qBound(
+                -1.0, static_cast<double>(gimbal.yaw_motor) / 180.0, 1.0);
+            m_currentState.tilt = qBound(
+                -1.0, static_cast<double>(gimbal.pitch_motor) / 90.0, 1.0);
+            m_currentState.panTiltKnown = true;
+        } else {
+            m_currentState.panTiltKnown = false;
+        }
     }
     m_currentState.hdrEnabled = status.tiny.hdr;
     m_currentState.faceAEEnabled = status.tiny.face_ae;
@@ -733,16 +1413,24 @@ void CameraController::updateState()
     Device::DevWhiteBalanceType wbType;
     int32_t wbParam;
 
-    if (m_device->cameraGetImageBrightnessR(brightness) == 0) {
+    const bool brightnessRead =
+        m_device->cameraGetImageBrightnessR(brightness) == 0;
+    const bool contrastRead =
+        m_device->cameraGetImageContrastR(contrast) == 0;
+    const bool saturationRead =
+        m_device->cameraGetImageSaturationR(saturation) == 0;
+    const bool whiteBalanceRead =
+        m_device->cameraGetWhiteBalanceR(wbType, wbParam) == 0;
+    if (brightnessRead) {
         m_currentState.brightness = clampToRange(brightness, m_brightnessRange, 0, 255);
     }
-    if (m_device->cameraGetImageContrastR(contrast) == 0) {
+    if (contrastRead) {
         m_currentState.contrast = clampToRange(contrast, m_contrastRange, 0, 255);
     }
-    if (m_device->cameraGetImageSaturationR(saturation) == 0) {
+    if (saturationRead) {
         m_currentState.saturation = clampToRange(saturation, m_saturationRange, 0, 255);
     }
-    if (m_device->cameraGetWhiteBalanceR(wbType, wbParam) == 0) {
+    if (whiteBalanceRead) {
         m_currentState.whiteBalance = static_cast<int>(wbType);
         if (wbType == Device::DevWhiteBalanceManual) {
             m_currentState.whiteBalanceKelvin = clampToRange(wbParam, m_whiteBalanceKelvinRange, 2000, 10000);
@@ -752,6 +1440,10 @@ void CameraController::updateState()
     }
 
     // Restore auto mode flags (not stored in camera)
+    m_currentState.imageSettingsKnown =
+        brightnessRead && contrastRead && saturationRead && whiteBalanceRead
+        && (!isTiny2Family() || freshStatusRead);
+
     m_currentState.brightnessAuto = preservedBrightnessAuto;
     m_currentState.contrastAuto = preservedContrastAuto;
     m_currentState.saturationAuto = preservedSaturationAuto;
@@ -763,6 +1455,41 @@ void CameraController::updateState()
     }
 
     emit stateChanged(m_currentState);
+}
+
+void CameraController::schedulePendingManualPosition()
+{
+    if (!m_pendingManualPosition || !m_connected || m_v4l2Only
+        || !m_aiStateConfirmed
+        || m_currentState.aiMode != Device::AiWorkModeNone) {
+        return;
+    }
+
+    const PendingManualPosition pending = *m_pendingManualPosition;
+    QTimer::singleShot(0, this, [this, pending]() {
+        if (!m_pendingManualPosition || !m_connected || m_v4l2Only
+            || pending.trackingIntentGeneration != m_trackingIntentGeneration
+            || pending.connectionGeneration != m_connectionGeneration
+            || !m_aiStateConfirmed
+            || m_currentState.aiMode != Device::AiWorkModeNone) {
+            return;
+        }
+        m_pendingManualPosition.reset();
+        if (pending.applyZoom && !setZoom(pending.zoom)) {
+            return;
+        }
+        if (pending.applyPanTilt
+            && !setPanTilt(pending.pan, pending.tilt)) {
+            return;
+        }
+        if (pending.focus) {
+            if (*pending.focus >= 0) {
+                setFocusAbsolute(*pending.focus, false);
+            } else {
+                setFocusAbsolute(0, true);
+            }
+        }
+    });
 }
 
 void CameraController::beginSettling(int durationMs)
@@ -779,8 +1506,8 @@ bool CameraController::loadConfig(std::vector<Config::ValidationError> &errors)
 
 bool CameraController::saveConfig()
 {
-    // Update config with current camera state before saving
-    saveCurrentStateToConfig();
+    // Config is the explicit persisted-intent model. Live SDK telemetry is
+    // deliberately never promoted here.
     return m_config.save();
 }
 
@@ -790,40 +1517,69 @@ void CameraController::applyConfigToCamera()
 
     auto settings = m_config.getSettings();
 
-    // Initialize auto mode flags from config
-    m_currentState.brightnessAuto = settings.brightnessAuto;
-    m_currentState.contrastAuto = settings.contrastAuto;
-    m_currentState.saturationAuto = settings.saturationAuto;
-
-    // Apply all settings to the camera
-    enableAutoFraming(settings.faceTracking);
-    setHDR(settings.hdr);
-    setFOV(settings.fov);
-    setFaceAE(settings.faceAE);
-    setFaceFocus(settings.faceFocus);
-    setZoom(settings.zoom);
-    setPanTilt(settings.pan, settings.tilt);
-    if (settings.focus >= 0) {
-        setFocusAbsolute(settings.focus, false);
-    } else {
-        setFocusAbsolute(0, true);
+    if (settings.imageIntentDefined) {
+        m_currentState.brightnessAuto = settings.brightnessAuto;
+        m_currentState.contrastAuto = settings.contrastAuto;
+        m_currentState.saturationAuto = settings.saturationAuto;
     }
 
-    if (isTiny2Family()) {
-        setAiMode(settings.aiMode, settings.aiSubMode);
-        setAutoZoom(settings.autoZoom);
-        setTrackSpeed(settings.trackSpeed);
+    // Apply all settings to the camera
+    const auto trackingResult = setTrackingState(
+        settings.faceTracking, settings.aiMode,
+        settings.aiSubMode, settings.activeTrackingProfile);
+    if (settings.imageIntentDefined) {
+        setHDR(settings.hdr);
+        setFOV(settings.fov);
+        setFaceAE(settings.faceAE);
+        if (!isTiny2Family()) {
+            setFaceFocus(settings.faceFocus);
+        }
+    }
+    if (!settings.faceTracking && trackingResult.trackingModeApplied) {
+        if (trackingResult.confirmationPending) {
+            m_pendingManualPosition = PendingManualPosition{
+                settings.pan,
+                settings.tilt,
+                settings.zoom,
+                settings.panTiltIntentDefined,
+                settings.zoomIntentDefined,
+                std::nullopt,
+                m_trackingIntentGeneration,
+                m_connectionGeneration
+            };
+        } else {
+            bool positionApplied = true;
+            if (settings.zoomIntentDefined) {
+                positionApplied = setZoom(settings.zoom);
+            }
+            if (positionApplied && settings.panTiltIntentDefined) {
+                positionApplied = setPanTilt(settings.pan, settings.tilt);
+            }
+            if (positionApplied) {
+                if (settings.focus >= 0) {
+                    setFocusAbsolute(settings.focus, false);
+                } else {
+                    setFocusAbsolute(0, true);
+                }
+            }
+        }
+    }
+
+    if (isTiny2Family() && settings.imageIntentDefined) {
+        // Tiny 2 speed and focus are applied only after exact AI-mode
+        // confirmation as part of activeTrackingProfile.
         setAudioAutoGain(settings.audioAutoGain);
     }
 
-    // Image controls
-    setBrightness(settings.brightness);
-    setContrast(settings.contrast);
-    setSaturation(settings.saturation);
-    if (settings.whiteBalance == static_cast<int>(Device::DevWhiteBalanceManual)) {
-        setWhiteBalanceManual(settings.whiteBalanceKelvin);
-    } else {
-        setWhiteBalance(settings.whiteBalance);
+    if (settings.imageIntentDefined) {
+        setBrightness(settings.brightness);
+        setContrast(settings.contrast);
+        setSaturation(settings.saturation);
+        if (settings.whiteBalance == static_cast<int>(Device::DevWhiteBalanceManual)) {
+            setWhiteBalanceManual(settings.whiteBalanceKelvin);
+        } else {
+            setWhiteBalance(settings.whiteBalance);
+        }
     }
 
     emit configLoaded();
@@ -844,20 +1600,46 @@ void CameraController::applyCurrentStateToCamera(const CameraState &uiState)
     // Begin settling period - block status updates for 2 seconds
     beginSettling(2000);
 
-    // Apply the current UI state to camera (respects user changes)
-    enableAutoFraming(uiState.autoFramingEnabled);
+    // Apply the current UI state to camera (respects user changes). A remembered
+    // nonzero AI mode must never override an explicit manual/off state.
+    TrackingModeProfile profile = legacyTrackingModeProfile(
+        uiState.faceFocusEnabled,
+        uiState.autoFocusEnabled ? -1 : uiState.manualFocusValue,
+        uiState.autoZoomEnabled,
+        uiState.trackSpeedMode);
+    if (!uiState.autoFramingEnabled) {
+        profile.focusPolicy = TrackingFocusPolicy::Manual;
+        profile.manualFocusPosition = uiState.manualFocusValue;
+        profile.autoZoom = false;
+    }
+    const auto trackingResult = setTrackingState(
+        uiState.autoFramingEnabled, uiState.aiMode,
+        uiState.aiSubMode, profile);
     if (isTiny2Family()) {
-        setAiMode(uiState.aiMode, uiState.aiSubMode);
-        setAutoZoom(uiState.autoZoomEnabled);
-        setTrackSpeed(uiState.trackSpeedMode);
         setAudioAutoGain(uiState.audioAutoGainEnabled);
     }
     setHDR(uiState.hdrEnabled);
     setFOV(uiState.fovMode);
     setFaceAE(uiState.faceAEEnabled);
-    setFaceFocus(uiState.faceFocusEnabled);
-    setZoom(uiState.zoom);
-    setPanTilt(uiState.pan, uiState.tilt);
+    if (!isTiny2Family()) {
+        setFaceFocus(uiState.faceFocusEnabled);
+    }
+    if (!uiState.autoFramingEnabled && trackingResult.trackingModeApplied) {
+        if (trackingResult.confirmationPending) {
+            m_pendingManualPosition = PendingManualPosition{
+                uiState.pan,
+                uiState.tilt,
+                uiState.zoom,
+                true,
+                true,
+                std::nullopt,
+                m_trackingIntentGeneration,
+                m_connectionGeneration
+            };
+        } else if (setZoom(uiState.zoom)) {
+            setPanTilt(uiState.pan, uiState.tilt);
+        }
+    }
 
     // Image controls
     setBrightness(uiState.brightness);
@@ -870,45 +1652,25 @@ void CameraController::applyCurrentStateToCamera(const CameraState &uiState)
     }
 }
 
-void CameraController::saveCurrentStateToConfig()
-{
-    // Get current settings to preserve app settings (like startMinimized)
-    Config::CameraSettings settings = m_config.getSettings();
-
-    // Update only camera-related settings from current state
-    settings.faceTracking = m_currentState.autoFramingEnabled;
-    settings.hdr = m_currentState.hdrEnabled;
-    settings.fov = m_currentState.fovMode;
-    settings.faceAE = m_currentState.faceAEEnabled;
-    settings.faceFocus = m_currentState.faceFocusEnabled;
-    settings.zoom = qBound(1.0, m_currentState.zoom, 2.0);
-    settings.pan = m_currentState.pan;
-    settings.tilt = m_currentState.tilt;
-    settings.aiMode = m_currentState.aiMode;
-    settings.aiSubMode = m_currentState.aiSubMode;
-    settings.autoZoom = m_currentState.autoZoomEnabled;
-    settings.trackSpeed = m_currentState.trackSpeedMode;
-    settings.audioAutoGain = m_currentState.audioAutoGainEnabled;
-
-    // Image controls
-    settings.brightnessAuto = m_currentState.brightnessAuto;
-    settings.brightness = m_currentState.brightness;
-    settings.contrastAuto = m_currentState.contrastAuto;
-    settings.contrast = m_currentState.contrast;
-    settings.saturationAuto = m_currentState.saturationAuto;
-    settings.saturation = m_currentState.saturation;
-    settings.whiteBalance = m_currentState.whiteBalance;
-    settings.whiteBalanceKelvin = m_currentState.whiteBalanceKelvin;
-    settings.focus = m_currentState.autoFocusEnabled ? -1 : m_currentState.manualFocusValue;
-
-    m_config.setSettings(settings);
-}
-
 bool CameraController::isTiny2Family() const
 {
     return m_cameraInfo.productType == ObsbotProdTiny2 ||
            m_cameraInfo.productType == ObsbotProdTiny2Lite ||
            m_cameraInfo.productType == ObsbotProdTinySE;
+}
+
+bool CameraController::isOriginalTinyFamily() const
+{
+    return m_cameraInfo.productType == ObsbotProdTiny
+        || m_cameraInfo.productType == ObsbotProdTiny4k;
+}
+
+bool CameraController::isMeetFamily() const
+{
+    return m_cameraInfo.productType == ObsbotProdMeet
+        || m_cameraInfo.productType == ObsbotProdMeet4k
+        || m_cameraInfo.productType == ObsbotProdMeet2
+        || m_cameraInfo.productType == ObsbotProdMeetSE;
 }
 
 void CameraController::refreshControlRanges()

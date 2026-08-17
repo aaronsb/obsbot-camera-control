@@ -174,6 +174,7 @@ FilterPreviewWidget::FilterPreviewWidget(QWidget *parent)
     , m_textureDirty(false)
     , m_emitPending(false)
     , m_effectSettings(VideoEffectsSettings::defaults())
+    , m_lastPaperDetected(false)
     , m_vertexBuffer(QOpenGLBuffer::VertexBuffer)
     , m_geometryInitialized(false)
 {
@@ -195,8 +196,32 @@ void FilterPreviewWidget::setVideoEffects(const VideoEffectsSettings &settings)
     if (m_effectSettings == settings) {
         return;
     }
+    const bool cropModeChanged =
+        m_effectSettings.paperCrop.mode != settings.paperCrop.mode;
     m_effectSettings = settings;
+    if (cropModeChanged) {
+        resetPaperDetection();
+    }
     update();
+}
+
+bool FilterPreviewWidget::automaticPaperCropAvailable()
+{
+    return PaperCropProcessor::automaticDetectionAvailable();
+}
+
+bool FilterPreviewWidget::paperDetected() const
+{
+    return m_paperCropProcessor.paperDetected();
+}
+
+void FilterPreviewWidget::resetPaperDetection()
+{
+    m_paperCropProcessor.reset();
+    if (m_lastPaperDetected) {
+        m_lastPaperDetected = false;
+        emit paperDetectionChanged(false);
+    }
 }
 
 void FilterPreviewWidget::updateVideoFrame(const QVideoFrame &frame)
@@ -209,6 +234,19 @@ void FilterPreviewWidget::updateVideoFrame(const QVideoFrame &frame)
     QImage image = copy.toImage();
     if (image.isNull()) {
         return;
+    }
+
+    image = m_paperCropProcessor.process(image, m_effectSettings.paperCrop);
+    if (image.isNull()) {
+        return;
+    }
+
+    const bool paperDetectedNow =
+        m_effectSettings.paperCrop.mode == PaperCropMode::Automatic
+        && m_paperCropProcessor.paperDetected();
+    if (paperDetectedNow != m_lastPaperDetected) {
+        m_lastPaperDetected = paperDetectedNow;
+        emit paperDetectionChanged(paperDetectedNow);
     }
 
     if (image.format() != QImage::Format_RGBA8888) {
@@ -272,7 +310,7 @@ void FilterPreviewWidget::paintGL()
 
     if (m_emitPending && m_framebuffer) {
         m_framebuffer->bind();
-        renderToCurrentTarget(frameSize);
+        renderToCurrentTarget(frameSize, false);
 
         QImage output(frameSize, QImage::Format_RGBA8888);
         glPixelStorei(GL_PACK_ALIGNMENT, 1);
@@ -284,7 +322,7 @@ void FilterPreviewWidget::paintGL()
         m_emitPending = false;
     }
 
-    renderToCurrentTarget(size());
+    renderToCurrentTarget(size(), true);
     m_program->release();
 }
 
@@ -403,13 +441,14 @@ void FilterPreviewWidget::uploadTextureIfNeeded()
     m_textureDirty = false;
 }
 
-void FilterPreviewWidget::renderToCurrentTarget(const QSize &targetSize)
+void FilterPreviewWidget::renderToCurrentTarget(
+    const QSize &targetSize, bool useDevicePixelRatio)
 {
     if (!m_program || !m_texture) {
         return;
     }
 
-    const qreal dpr = devicePixelRatioF();
+    const qreal dpr = useDevicePixelRatio ? devicePixelRatioF() : 1.0;
     const QSize physicalSize = (QSizeF(targetSize) * dpr).toSize();
 
     glViewport(0, 0, physicalSize.width(), physicalSize.height());

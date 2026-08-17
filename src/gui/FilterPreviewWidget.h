@@ -1,6 +1,9 @@
 #ifndef FILTERPREVIEWWIDGET_H
 #define FILTERPREVIEWWIDGET_H
 
+#include "PaperCropProcessor.h"
+#include "PaperCropSettings.h"
+
 #include <QColor>
 #include <QImage>
 #include <QOpenGLBuffer>
@@ -40,6 +43,7 @@ public:
         QColor duoToneShadow = QColor(30, 30, 60);
         QColor duoToneHighlight = QColor(220, 180, 160);
         bool horizontalFlip = false;
+        PaperCropSettings paperCrop;
 
         bool operator==(const VideoEffectsSettings &other) const
         {
@@ -61,7 +65,8 @@ public:
                 && qFuzzyCompare(1.0f + duoToneIntensity, 1.0f + other.duoToneIntensity)
                 && duoToneShadow == other.duoToneShadow
                 && duoToneHighlight == other.duoToneHighlight
-                && horizontalFlip == other.horizontalFlip;
+                && horizontalFlip == other.horizontalFlip
+                && paperCrop == other.paperCrop;
         }
 
         bool operator!=(const VideoEffectsSettings &other) const
@@ -78,9 +83,13 @@ public:
     void setVideoEffects(const VideoEffectsSettings &settings);
     VideoEffectsSettings videoEffects() const { return m_effectSettings; }
     void updateVideoFrame(const QVideoFrame &frame);
+    static bool automaticPaperCropAvailable();
+    bool paperDetected() const;
+    void resetPaperDetection();
 
 signals:
     void processedFrameReady(const QImage &frame);
+    void paperDetectionChanged(bool detected);
 
 protected:
     void initializeGL() override;
@@ -92,7 +101,7 @@ private:
     void ensureGeometry();
     void ensureFramebuffer(const QSize &size);
     void uploadTextureIfNeeded();
-    void renderToCurrentTarget(const QSize &targetSize);
+    void renderToCurrentTarget(const QSize &targetSize, bool useDevicePixelRatio);
     void applyEffectsUniforms();
     QVector3D srgbColorToLinearVec3(const QColor &color) const;
 
@@ -103,6 +112,8 @@ private:
     bool m_textureDirty;
     bool m_emitPending;
     VideoEffectsSettings m_effectSettings;
+    PaperCropProcessor m_paperCropProcessor;
+    bool m_lastPaperDetected;
 
     std::unique_ptr<QOpenGLShaderProgram> m_program;
     std::unique_ptr<QOpenGLTexture> m_texture;

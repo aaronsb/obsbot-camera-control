@@ -60,6 +60,8 @@ void CameraController::connectToCamera(const QString &devicePath)
             if (dev) {
                 m_device = dev;
                 m_connected = true;
+                m_v4l2Only = false;                       // SDK reached: clear stale V4L2 fallback
+                if (m_v4l2ScanTimer) m_v4l2ScanTimer->stop();
                 m_cameraInfo.name = QString::fromStdString(m_device->devName());
                 m_cameraInfo.serialNumber = QString::fromStdString(m_device->devSn());
                 m_cameraInfo.version = QString::fromStdString(m_device->devVersion());
@@ -86,6 +88,8 @@ void CameraController::connectToCamera(const QString &devicePath)
         if (dev) {
             m_device = dev;
             m_connected = true;
+            m_v4l2Only = false;                       // SDK reached: clear stale V4L2 fallback
+            if (m_v4l2ScanTimer) m_v4l2ScanTimer->stop();
             m_cameraInfo.name = QString::fromStdString(m_device->devName());
             m_cameraInfo.serialNumber = QString::fromStdString(m_device->devSn());
             m_cameraInfo.version = QString::fromStdString(m_device->devVersion());

@@ -6,6 +6,7 @@
 #include <QComboBox>
 #include <QSlider>
 #include <QLabel>
+#include <QPushButton>
 #include <QHBoxLayout>
 #include <QVBoxLayout>
 #include <QGroupBox>
@@ -27,27 +28,36 @@ public:
 
     void updateFromState(const CameraController::CameraState &state);
     void setV4l2Mode(bool v4l2Only);
+    void setPositionPresetsWidget(QWidget *widget);
+    QGroupBox *focusGroup() const { return m_focusGroupBox; }
+    QGroupBox *gimbalControlGroup() const { return m_gimbalControlGroup; }
     bool isTrackingEnabled() const { return m_trackingCheckBox->isChecked(); }
     void setTrackingEnabled(bool enabled) {
         m_trackingCheckBox->blockSignals(true);
         m_trackingCheckBox->setChecked(enabled);
+        m_trackingCheckBox->setText(enabled ? "Disable" : "Enable");
         m_trackingCheckBox->blockSignals(false);
     }
     void setAiMode(int mode);
     void setHumanSubMode(int subMode);
     void setAutoZoomEnabled(bool enabled);
     void setTrackSpeed(int speedMode);
+    void setTrackingStyle(int style);
     void setAudioAutoGain(bool enabled);
     int currentAiMode() const { return m_modeCombo->currentData().toInt(); }
     int currentHumanSubMode() const { return m_humanSubModeCombo->currentData().toInt(); }
     bool isAutoZoomEnabled() const { return m_autoZoomCheckBox->isChecked(); }
     int currentTrackSpeed() const { return m_speedCombo->currentData().toInt(); }
+    int currentTrackingStyle() const { return m_trackingStyle; }
     bool isAudioAutoGainEnabled() const { return m_audioGainCheckBox->isChecked(); }
-    void setMirrored(bool mirrored);
-    bool isInvertControls() const { return m_invertControlsCheckBox->isChecked(); }
+    bool isFaceFocusEnabled() const { return m_faceFocusCheckBox->isChecked(); }
+    void setFaceFocusEnabled(bool enabled);
+    void setInvertControls(bool invertX, bool invertY);
+    bool isInvertX() const { return m_invertXCheckBox->isChecked(); }
+    bool isInvertY() const { return m_invertYCheckBox->isChecked(); }
 
 signals:
-    void mirrorToggled(bool mirrored);
+    void invertControlsChanged(bool invertX, bool invertY);
 
 private slots:
     void onTrackingToggled(bool checked);
@@ -56,6 +66,8 @@ private slots:
     void onAutoZoomToggled(bool checked);
     void onSpeedChanged(int index);
     void onAudioGainToggled(bool checked);
+    void onTrackingStyleChanged(int index);
+    void onFaceFocusToggled(bool checked);
 
     // Manual PTZ control slots
     void onXYPadChanged(float x, float y);
@@ -64,25 +76,30 @@ private slots:
 
 private:
     CameraController *m_controller;
-    QCheckBox *m_trackingCheckBox;
+    QPushButton *m_trackingCheckBox;
     QComboBox *m_modeCombo;
     QComboBox *m_humanSubModeCombo;
     QCheckBox *m_autoZoomCheckBox;
     QComboBox *m_speedCombo;
     QCheckBox *m_audioGainCheckBox;
     QWidget *m_advancedContainer;
+    QWidget *m_originalTinyContainer;
+    QPushButton *m_trackingStyleButtons[3];
+    int m_trackingStyle = Device::AiVTrackStandard;
     bool m_userInitiated;  // Track if change was user-initiated
     QTimer *m_commandTimer;  // Debounce timer for command completion
     bool m_tiny2Capabilities; // flag for advanced tracking features
 
     // Manual PTZ controls
     XYPad *m_xyPad;
-    QCheckBox *m_invertControlsCheckBox;
-    QCheckBox *m_mirrorCheckBox;
+    QCheckBox *m_invertXCheckBox;
+    QCheckBox *m_invertYCheckBox;
     QSlider *m_zoomSlider;
     QLabel *m_zoomLabel;
+    QPushButton *m_fovButtons[3];
     QSlider *m_focusSlider;
     QLabel *m_focusLabel;
+    QCheckBox *m_faceFocusCheckBox;
     QLabel *m_positionLabel;
     QWidget *m_ptzContainer;
 
@@ -102,6 +119,8 @@ private:
     void updatePTZControlsState();
 
     QGroupBox *m_trackingGroupBox;
+    QGroupBox *m_focusGroupBox;
+    QGroupBox *m_gimbalControlGroup;
 };
 
 #endif // TRACKINGCONTROLWIDGET_H

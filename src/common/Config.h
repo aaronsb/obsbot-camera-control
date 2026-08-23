@@ -33,6 +33,7 @@ public:
     struct CameraSettings {
         struct PresetSlot {
             bool defined;
+            std::string name;
             double pan;
             double tilt;
             double zoom;
@@ -52,6 +53,7 @@ public:
         int aiSubMode;        // Device::AiSubModeType
         bool autoZoom;        // Enable adaptive auto zoom
         int trackSpeed;       // Device::AiTrackSpeedType
+        int trackingStyle;    // Device::AiVerticalTrackType (Tiny/Tiny 4K)
 
         // Image controls
         bool brightnessAuto;  // Auto mode for brightness
@@ -60,6 +62,9 @@ public:
         int contrast;         // Typically 0-255 or similar range
         bool saturationAuto;  // Auto mode for saturation
         int saturation;       // Typically 0-255 or similar range
+        int hue;
+        int sharpness;
+        int antiFlicker;
         int whiteBalance;     // 0=Auto, 1=Daylight, 2=Fluorescent, etc.
         int whiteBalanceKelvin; // Manual Kelvin value (when whiteBalance==255)
         int focus;            // Manual focus position (0-100, -1 = auto)
@@ -74,6 +79,8 @@ public:
 
         // Application settings
         bool startMinimized;  // Start application minimized to tray
+        bool invertGimbalX;
+        bool invertGimbalY;
         bool virtualCameraEnabled;
         std::string virtualCameraDevice;
         std::string virtualCameraResolution;

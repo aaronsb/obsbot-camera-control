@@ -34,6 +34,7 @@ void Config::setDefaults()
     m_settings.aiSubMode = 0;         // AiSubModeNormal
     m_settings.autoZoom = false;
     m_settings.trackSpeed = 2;        // AiTrackSpeedStandard
+    m_settings.trackingStyle = 0;      // AiVTrackStandard
 
     // Image controls - use auto mode by default
     m_settings.brightnessAuto = true;
@@ -42,6 +43,9 @@ void Config::setDefaults()
     m_settings.contrast = 128;
     m_settings.saturationAuto = true;
     m_settings.saturation = 128;
+    m_settings.hue = 50;
+    m_settings.sharpness = 50;
+    m_settings.antiFlicker = 1;
     m_settings.whiteBalance = 0;      // Auto
     m_settings.whiteBalanceKelvin = 5000;
     m_settings.focus = -1;            // Auto focus
@@ -54,6 +58,7 @@ void Config::setDefaults()
 
     for (auto &preset : m_settings.presets) {
         preset.defined = false;
+        preset.name.clear();
         preset.pan = 0.0;
         preset.tilt = 0.0;
         preset.zoom = 1.0;
@@ -61,6 +66,8 @@ void Config::setDefaults()
 
     // Application settings
     m_settings.startMinimized = false;
+    m_settings.invertGimbalX = false;
+    m_settings.invertGimbalY = false;
     m_settings.virtualCameraEnabled = false;
     m_settings.virtualCameraDevice = "/dev/video42";
     m_settings.virtualCameraResolution = "match";
@@ -183,6 +190,10 @@ bool Config::load(std::vector<ValidationError> &errors)
         "ai_sub_mode",
         "auto_zoom",
         "track_speed",
+        "tracking_style",
+        "hue",
+        "sharpness",
+        "anti_flicker",
         "audio_auto_gain",
         "preview_format",
         "virtual_camera_enabled",
@@ -190,7 +201,9 @@ bool Config::load(std::vector<ValidationError> &errors)
         "virtual_camera_resolution",
         "white_balance_kelvin",
         "focus",
-        "snapshot_directory"
+        "snapshot_directory",
+        "invert_gimbal_x",
+        "invert_gimbal_y"
     };
 
     auto isPresetKey = [](const std::string &key) -> bool {
@@ -210,6 +223,7 @@ bool Config::load(std::vector<ValidationError> &errors)
         const std::string suffix = key.substr(8);
         static const std::unordered_set<std::string> presetSuffixes = {
             "defined",
+            "name",
             "pan",
             "tilt",
             "zoom"
@@ -275,6 +289,9 @@ bool Config::parseLine(const std::string &line, int lineNumber, std::vector<Vali
                     addError(InvalidValue, base + "defined must be true/false or enabled/disabled");
                     return false;
                 }
+                return true;
+            } else if (suffix == "name") {
+                preset.name = value;
                 return true;
             } else if (suffix == "pan") {
                 try {
@@ -430,6 +447,18 @@ bool Config::parseLine(const std::string &line, int lineNumber, std::vector<Vali
             addError(InvalidValue, "track_speed must be an integer between 0 and 5");
             return false;
         }
+    } else if (key == "tracking_style") {
+        try {
+            int style = std::stoi(value);
+            if (style < 0 || style > 2) {
+                addError(InvalidValue, "tracking_style must be between 0 and 2");
+                return false;
+            }
+            m_settings.trackingStyle = style;
+        } catch (...) {
+            addError(InvalidValue, "tracking_style must be an integer between 0 and 2");
+            return false;
+        }
     } else if (key == "brightness_auto") {
         if (!parseBool(value, m_settings.brightnessAuto)) {
             addError(InvalidValue, "brightness_auto must be true/false or enabled/disabled");
@@ -488,6 +517,21 @@ bool Config::parseLine(const std::string &line, int lineNumber, std::vector<Vali
             }
         } catch (...) {
             addError(InvalidValue, "saturation must be an integer between 0 and 255");
+            return false;
+        }
+    } else if (key == "hue" || key == "sharpness" || key == "anti_flicker") {
+        try {
+            int parsed = std::stoi(value);
+            const int maximum = key == "anti_flicker" ? 3 : 100;
+            if (parsed < 0 || parsed > maximum) {
+                addError(InvalidValue, key + " is out of range");
+                return false;
+            }
+            if (key == "hue") m_settings.hue = parsed;
+            else if (key == "sharpness") m_settings.sharpness = parsed;
+            else m_settings.antiFlicker = parsed;
+        } catch (...) {
+            addError(InvalidValue, key + " must be an integer");
             return false;
         }
     } else if (key == "white_balance") {
@@ -553,6 +597,16 @@ bool Config::parseLine(const std::string &line, int lineNumber, std::vector<Vali
     } else if (key == "start_minimized") {
         if (!parseBool(value, m_settings.startMinimized)) {
             addError(InvalidValue, "start_minimized must be true/false or enabled/disabled");
+            return false;
+        }
+    } else if (key == "invert_gimbal_x") {
+        if (!parseBool(value, m_settings.invertGimbalX)) {
+            addError(InvalidValue, "invert_gimbal_x must be true/false or enabled/disabled");
+            return false;
+        }
+    } else if (key == "invert_gimbal_y") {
+        if (!parseBool(value, m_settings.invertGimbalY)) {
+            addError(InvalidValue, "invert_gimbal_y must be true/false or enabled/disabled");
             return false;
         }
     } else if (key == "virtual_camera_enabled") {
@@ -643,6 +697,10 @@ bool Config::validateSettings(std::vector<ValidationError> &errors)
 
     if (m_settings.trackSpeed < 0 || m_settings.trackSpeed > 5) {
         addError("track_speed out of range (must be 0-5)");
+    }
+
+    if (m_settings.trackingStyle < 0 || m_settings.trackingStyle > 2) {
+        addError("tracking_style out of range (must be 0-2)");
     }
 
     if (m_settings.whiteBalance == 255) {
@@ -767,6 +825,9 @@ bool Config::save()
     file << "# Tracking Speed (0=Lazy,1=Slow,2=Standard,3=Fast,4=Crazy,5=Auto)\n";
     file << "track_speed=" << m_settings.trackSpeed << "\n\n";
 
+    file << "# Tiny tracking style (0=Standard,1=Headroom,2=Motion)\n";
+    file << "tracking_style=" << m_settings.trackingStyle << "\n\n";
+
     // Image controls
     file << "# Brightness Auto Mode (when enabled, brightness slider is read-only)\n";
     file << "brightness_auto=" << (m_settings.brightnessAuto ? "enabled" : "disabled") << "\n";
@@ -782,6 +843,13 @@ bool Config::save()
     file << "saturation_auto=" << (m_settings.saturationAuto ? "enabled" : "disabled") << "\n";
     file << "# Saturation (0-255, default 128)\n";
     file << "saturation=" << m_settings.saturation << "\n\n";
+
+    file << "# Hue and sharpness (camera range is applied at runtime)\n";
+    file << "hue=" << m_settings.hue << "\n";
+    file << "sharpness=" << m_settings.sharpness << "\n\n";
+
+    file << "# Anti-flicker (0=Off,1=50Hz,2=60Hz,3=Auto when supported)\n";
+    file << "anti_flicker=" << m_settings.antiFlicker << "\n\n";
 
     file << "# White Balance (auto/daylight/fluorescent/tungsten/flash/fine/cloudy/shade)\n";
     std::string wbStr;
@@ -808,6 +876,7 @@ bool Config::save()
         const auto &preset = m_settings.presets[i];
         file << "# PTZ Preset " << (i + 1) << "\n";
         file << "preset" << (i + 1) << "_defined=" << (preset.defined ? "enabled" : "disabled") << "\n";
+        file << "preset" << (i + 1) << "_name=" << preset.name << "\n";
         file << "preset" << (i + 1) << "_pan=" << preset.pan << "\n";
         file << "preset" << (i + 1) << "_tilt=" << preset.tilt << "\n";
         file << "preset" << (i + 1) << "_zoom=" << preset.zoom << "\n\n";
@@ -822,6 +891,8 @@ bool Config::save()
     file << "# Application Settings\n";
     file << "# Start application minimized to system tray\n";
     file << "start_minimized=" << (m_settings.startMinimized ? "enabled" : "disabled") << "\n";
+    file << "invert_gimbal_x=" << (m_settings.invertGimbalX ? "enabled" : "disabled") << "\n";
+    file << "invert_gimbal_y=" << (m_settings.invertGimbalY ? "enabled" : "disabled") << "\n";
 
     file << "\n# Virtual camera output\n";
     file << "virtual_camera_enabled=" << (m_settings.virtualCameraEnabled ? "enabled" : "disabled") << "\n";

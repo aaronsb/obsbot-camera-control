@@ -25,6 +25,10 @@ cd obsbot-camera-control
 ./build.sh install --confirm
 ```
 
+On Arch/Manjaro, Debian/Ubuntu, and Fedora/RHEL derivatives, the confirmed
+install command detects and installs missing build dependencies before
+compiling. It invokes `sudo` only when required packages are missing.
+
 The build script automatically:
 - Checks all dependencies
 - Shows missing packages with install commands for your distro
@@ -44,7 +48,8 @@ sudo pacman -S base-devel cmake qt6-base qt6-multimedia pkgconf
 
 #### Debian / Ubuntu
 ```bash
-sudo apt install build-essential cmake qt6-base-dev qt6-multimedia-dev pkg-config
+sudo apt install build-essential cmake qt6-base-dev qt6-multimedia-dev \
+  libqt6opengl6-dev pkg-config
 ```
 
 #### Fedora / RHEL / CentOS
@@ -316,7 +321,7 @@ update-desktop-database ~/.local/share/applications
 sudo pacman -S qt6-base qt6-multimedia
 
 # Debian/Ubuntu
-sudo apt install qt6-base-dev qt6-multimedia-dev
+sudo apt install qt6-base-dev qt6-multimedia-dev libqt6opengl6-dev
 
 # Fedora
 sudo dnf install qt6-qtbase-devel qt6-qtmultimedia-devel

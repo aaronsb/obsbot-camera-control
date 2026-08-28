@@ -60,6 +60,7 @@ show_usage() {
     echo -e "    Builds the project and installs binaries to your local bin directory."
     echo -e ""
     echo -e "    What it does:"
+    echo -e "    - Installs missing build dependencies on supported distributions"
     echo -e "    - Runs the build process (as above)"
     echo -e "    - Copies binaries to ${INSTALL_DIR}"
     echo -e "    - Makes them executable"
@@ -118,6 +119,11 @@ offer_path_update() {
     print_msg "$GREEN" "  For Zsh (add to ~/.zshrc):"
     print_msg "$BLUE" "    export PATH=\"\$HOME/.local/bin:\$PATH\""
     echo ""
+
+    if [ ! -t 0 ]; then
+        print_msg "$YELLOW" "Non-interactive install: skipping shell configuration update."
+        return 0
+    fi
 
     read -p "Would you like me to add this to your shell config automatically? [y/N] " -n 1 -r
     echo
@@ -339,11 +345,6 @@ check_dependencies() {
         return 1
     }
 
-    # Helper: check if Qt6 is available via qtpaths6
-    have_qtpaths6() {
-        command -v qtpaths6 >/dev/null 2>&1 || command -v qtpaths-qt6 >/dev/null 2>&1
-    }
-
     # Helper: get Qt6 version from qtpaths
     get_qt6_version() {
         if command -v qtpaths6 >/dev/null 2>&1; then
@@ -353,7 +354,9 @@ check_dependencies() {
         fi
     }
 
-    # Helper: generic component check with pkg-config, CMake, or qtpaths fallback
+    # Helper: check for the development metadata CMake needs. qtpaths6 alone
+    # only proves that the Qt runtime is installed and must not satisfy this
+    # check (for example, Ubuntu ships it without Qt6Config.cmake).
     check_qt_component() {
         local label="$1"      # Display label
         local pc_name="$2"    # pkg-config name
@@ -377,17 +380,6 @@ check_dependencies() {
                 print_msg "$GREEN" "  ✓ $label ($ver via CMake)"
             else
                 print_msg "$GREEN" "  ✓ $label (via CMake)"
-            fi
-            return 0
-        fi
-
-        # Try qtpaths6 as last resort (confirms Qt6 exists even if module detection fails)
-        if have_qtpaths6; then
-            local ver=$(get_qt6_version)
-            if [ -n "$ver" ]; then
-                print_msg "$GREEN" "  ✓ $label ($ver via qtpaths)"
-            else
-                print_msg "$GREEN" "  ✓ $label (via qtpaths)"
             fi
             return 0
         fi
@@ -436,6 +428,44 @@ check_dependencies() {
         print_msg "$YELLOW" "\nPlease install the missing packages and try again."
         return 1
     fi
+}
+
+# Install the complete build dependency set for supported distributions.
+# This is only called by the confirmed install command after the dependency
+# check fails; package managers safely ignore packages already installed.
+install_build_dependencies() {
+    local distro
+    distro=$(detect_distro)
+
+    print_msg "$YELLOW" "\nMissing build dependencies will now be installed."
+
+    case "$distro" in
+        arch|manjaro|endeavouros)
+            sudo pacman -S --needed cmake base-devel pkgconf qt6-base qt6-multimedia
+            ;;
+        debian|ubuntu|mint|pop)
+            sudo apt install -y \
+                cmake \
+                build-essential \
+                pkg-config \
+                qt6-base-dev \
+                qt6-multimedia-dev \
+                libqt6opengl6-dev
+            ;;
+        rhel|fedora|centos|rocky|almalinux)
+            sudo dnf group install -y "Development Tools"
+            sudo dnf install -y \
+                cmake \
+                pkgconfig \
+                qt6-qtbase-devel \
+                qt6-qtmultimedia-devel
+            ;;
+        *)
+            print_msg "$RED" "❌ Automatic dependency installation is not supported for this distribution."
+            print_msg "$YELLOW" "Install the packages listed above, then rerun this command."
+            return 1
+            ;;
+    esac
 }
 
 # Build the project
@@ -487,6 +517,19 @@ do_build() {
 
 # Install the project
 do_install() {
+    # A confirmed install is a complete bootstrap on supported distributions.
+    # Check first so sudo/package managers are not invoked unnecessarily.
+    if ! check_dependencies; then
+        install_build_dependencies
+
+        echo ""
+        print_msg "$BLUE" "Verifying installed dependencies..."
+        if ! check_dependencies; then
+            print_msg "$RED" "❌ Dependencies are still incomplete after package installation."
+            return 1
+        fi
+    fi
+
     # Build first
     do_build
 
@@ -506,12 +549,20 @@ do_install() {
 
     local installed_apps="  - obsbot-gui"
 
-    # Ask about CLI installation
-    echo ""
-    read -p "Install CLI tool as well? [y/N] " -n 1 -r
-    echo
+    # Ask about CLI installation when interactive. In unattended installs,
+    # install both binaries so --confirm can complete without stdin.
+    local install_cli=false
+    if [ -t 0 ]; then
+        echo ""
+        read -p "Install CLI tool as well? [y/N] " -n 1 -r
+        echo
+        [[ $REPLY =~ ^[Yy]$ ]] && install_cli=true
+    else
+        install_cli=true
+        print_msg "$BLUE" "Non-interactive install: including CLI tool."
+    fi
 
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
+    if [ "$install_cli" = true ]; then
         print_msg "$BLUE" "Installing CLI tool..."
         cp "$BIN_DIR/obsbot-cli" "$INSTALL_DIR/"
         chmod +x "$INSTALL_DIR/obsbot-cli"
@@ -606,14 +657,15 @@ main() {
                 print_msg "$YELLOW" "⚠️  DRY RUN MODE - No changes will be made"
                 echo ""
                 print_msg "$NC" "This will:"
-                print_msg "$BLUE" "  1. Build the project (see: ./build.sh build)"
-                print_msg "$BLUE" "  2. Create $INSTALL_DIR if needed"
-                print_msg "$BLUE" "  3. Copy binaries to $INSTALL_DIR"
-                print_msg "$BLUE" "  4. Make binaries executable"
-                print_msg "$BLUE" "  5. Install desktop launcher to $DESKTOP_DIR"
-                print_msg "$BLUE" "  6. Install icon to $ICON_DIR"
-                print_msg "$BLUE" "  7. Check if $INSTALL_DIR is in PATH"
-                print_msg "$BLUE" "  8. Offer to add to PATH if needed (with your approval)"
+                print_msg "$BLUE" "  1. Install missing build dependencies on supported distributions"
+                print_msg "$BLUE" "  2. Build the project (see: ./build.sh build)"
+                print_msg "$BLUE" "  3. Create $INSTALL_DIR if needed"
+                print_msg "$BLUE" "  4. Copy binaries to $INSTALL_DIR"
+                print_msg "$BLUE" "  5. Make binaries executable"
+                print_msg "$BLUE" "  6. Install desktop launcher to $DESKTOP_DIR"
+                print_msg "$BLUE" "  7. Install icon to $ICON_DIR"
+                print_msg "$BLUE" "  8. Check if $INSTALL_DIR is in PATH"
+                print_msg "$BLUE" "  9. Offer to add to PATH if needed (with your approval)"
                 echo ""
                 print_msg "$YELLOW" "To actually install, run:"
                 print_msg "$GREEN" "  ./build.sh install --confirm"

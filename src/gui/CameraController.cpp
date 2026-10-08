@@ -361,9 +361,8 @@ bool CameraController::enableAutoFraming(bool enabled)
             return m_device->cameraSetMediaModeU(Device::MediaModeNormal);
         });
         if (success) {
-            // Switch to manual focus when auto-framing is disabled
-            setFocusAbsolute(m_currentState.manualFocusValue, false);
-
+            // Leave focus as it is: turning tracking off is not a request
+            // for manual focus.
             m_currentState.autoFramingEnabled = false;
             emit stateChanged(m_currentState);
         }
@@ -917,6 +916,17 @@ void CameraController::applyCurrentStateToCamera(const CameraState &uiState)
 
     // Apply the current UI state to camera (respects user changes)
     enableAutoFraming(uiState.autoFramingEnabled);
+
+    // Focus is not part of the UI state, so restore it from config.
+    // Auto-framing already switched to auto focus when it is on.
+    if (!uiState.autoFramingEnabled) {
+        int focus = m_config.getSettings().focus;
+        if (focus >= 0) {
+            setFocusAbsolute(focus, false);
+        } else {
+            setFocusAbsolute(0, true);
+        }
+    }
     if (isTiny2Family()) {
         setAiMode(uiState.aiMode, uiState.aiSubMode);
         setAutoZoom(uiState.autoZoomEnabled);

@@ -61,6 +61,7 @@ private slots:
     void onXYPadChanged(float x, float y);
     void onZoomChanged(int value);
     void onFocusChanged(int value);
+    void onAutoFocusToggled(bool checked);
 
 private:
     CameraController *m_controller;
@@ -82,6 +83,7 @@ private:
     QSlider *m_zoomSlider;
     QLabel *m_zoomLabel;
     QSlider *m_focusSlider;
+    QCheckBox *m_autoFocusCheckBox;
     QLabel *m_focusLabel;
     QLabel *m_positionLabel;
     QWidget *m_ptzContainer;

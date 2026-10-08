@@ -155,6 +155,11 @@ TrackingControlWidget::TrackingControlWidget(CameraController *controller, QWidg
     m_focusLabel = new QLabel("50", this);
     m_focusLabel->setMinimumWidth(40);
     focusLayout->addWidget(m_focusLabel);
+    m_autoFocusCheckBox = new QCheckBox(tr("Auto"), this);
+    m_autoFocusCheckBox->setChecked(true);
+    connect(m_autoFocusCheckBox, &QCheckBox::toggled, this, &TrackingControlWidget::onAutoFocusToggled);
+    focusLayout->addWidget(m_autoFocusCheckBox);
+    m_focusSlider->setEnabled(false);
     leftColumn->addLayout(focusLayout);
 
     // Invert controls checkbox
@@ -348,6 +353,14 @@ void TrackingControlWidget::updateFromState(const CameraController::CameraState 
         }
     }
 
+    // Sync auto focus checkbox; the slider only applies in manual focus
+    if (!commandInFlight && !isSettling && m_autoFocusCheckBox->isChecked() != state.autoFocusEnabled) {
+        m_autoFocusCheckBox->blockSignals(true);
+        m_autoFocusCheckBox->setChecked(state.autoFocusEnabled);
+        m_autoFocusCheckBox->blockSignals(false);
+        m_focusSlider->setEnabled(!state.autoFocusEnabled);
+    }
+
     // Sync focus slider from camera state (only when user isn't dragging)
     if (!m_focusSlider->isSliderDown() && !commandInFlight && !isSettling) {
         if (m_focusSlider->value() != state.manualFocusValue) {
@@ -529,6 +542,17 @@ void TrackingControlWidget::onFocusChanged(int value)
     m_dirtyFocus = true;
     m_focusLabel->setText(QString::number(value));
     scheduleFlush();
+}
+
+void TrackingControlWidget::onAutoFocusToggled(bool checked)
+{
+    m_focusSlider->setEnabled(!checked);
+    // Drop a queued manual focus so it can't switch auto focus back off
+    m_dirtyFocus = false;
+    m_userInitiated = true;
+    // Pass the slider position either way so it is kept for manual mode
+    m_controller->setFocusAbsolute(m_focusSlider->value(), checked);
+    m_commandTimer->start(1000);
 }
 
 void TrackingControlWidget::setV4l2Mode(bool v4l2Only)

@@ -68,6 +68,7 @@ OBSBOT cameras have excellent Linux UVC support, but lack native control softwar
 | **OBSBOT Tiny 2 Lite** | Partial | Detection works. Preview device path needs SDK fix. ([#8](https://github.com/aaronsb/obsbot-camera-control/issues/8)) |
 | **OBSBOT Tiny 4K** | Partial | PTZ, HDR, manual image controls work. Auto-framing and face AE/focus don't. ([#13](https://github.com/aaronsb/obsbot-camera-control/issues/13), [#7](https://github.com/aaronsb/obsbot-camera-control/issues/7)) |
 | **OBSBOT Meet SE** | Partial | Basic compatibility confirmed. ([#9](https://github.com/aaronsb/obsbot-camera-control/issues/9)) |
+| **OBSBOT Meet Flip** | Partial | Connects and controls work on firmware 4.5.3.3. Needs SDK v2.1.0_8; older SDKs never get a reply to the first handshake. |
 
 The SDK also lists: Tiny (original), Tiny SE, Meet (original), Meet 4K, Me, Tail Air, Tail 2, Tail 2S, HDMI Box, NDI Box. These are untested — if you have one, [open a compatibility report](https://github.com/aaronsb/obsbot-camera-control/issues/new?template=device_compatibility.md).
 

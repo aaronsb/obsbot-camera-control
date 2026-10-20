@@ -1445,6 +1445,12 @@ public:
      */
 	const std::string &audioDevPath() const;
 
+#elif defined(__linux__)
+
+	/// Exported by libdev.so on Linux but missing from the shipped header
+	const std::string &videoDevPath() const;
+	const std::string &audioDevPath() const;
+
 #endif
 
 	explicit Device(DeviceId *id);

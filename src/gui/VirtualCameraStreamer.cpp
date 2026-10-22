@@ -393,6 +393,8 @@ VirtualCameraStreamer::VirtualCameraStreamer(QObject *parent)
     , m_devicePath(QString::fromLatin1(kDefaultDevicePath))
     , m_enabled(false)
     , m_forcedResolution()
+    , m_maxFrameRate(0)
+    , m_nextFrameDueNs(0)
     , m_workerThread(nullptr)
     , m_worker(nullptr)
     , m_workerInitialized(false)
@@ -465,10 +467,57 @@ void VirtualCameraStreamer::setForcedResolution(const QSize &resolution)
         Qt::QueuedConnection);
 }
 
+void VirtualCameraStreamer::setMaxFrameRate(int fps)
+{
+    const int normalized = fps > 0 ? fps : 0;
+    if (normalized == m_maxFrameRate) {
+        return;
+    }
+
+    m_maxFrameRate = normalized;
+    m_frameRateTimer.invalidate();
+    m_nextFrameDueNs = 0;
+}
+
+bool VirtualCameraStreamer::shouldForwardFrame()
+{
+    if (m_maxFrameRate <= 0) {
+        return true;
+    }
+
+    const qint64 intervalNs = 1000000000LL / m_maxFrameRate;
+    if (!m_frameRateTimer.isValid()) {
+        m_frameRateTimer.start();
+        m_nextFrameDueNs = intervalNs;
+        return true;
+    }
+
+    // Deadlines sit on a fixed grid so that input timing jitter cannot push the
+    // output rate below the cap: a frame arriving slightly early is accepted, and a
+    // deadline missed by one input frame does not shift all later deadlines. The
+    // tolerance stays well under half an interval so each slot forwards at most one frame.
+    const qint64 nowNs = m_frameRateTimer.nsecsElapsed();
+    const qint64 toleranceNs = intervalNs / 4;
+    if (nowNs < m_nextFrameDueNs - toleranceNs) {
+        return false;
+    }
+
+    m_nextFrameDueNs += intervalNs;
+    if (m_nextFrameDueNs <= nowNs) {
+        // Input stalled for more than a full interval; resync instead of bursting to catch up
+        m_nextFrameDueNs = nowNs + intervalNs;
+    }
+    return true;
+}
+
 void VirtualCameraStreamer::onProcessedFrameReady(const QImage &frame)
 {
     if (!m_enabled || frame.isNull()) {
         return;
+    }
+
+    if (!shouldForwardFrame()) {
+        return; // Dropped to keep the output at the configured cap
     }
 
     ensureWorker();

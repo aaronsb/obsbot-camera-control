@@ -63,6 +63,7 @@ private slots:
     void onVirtualCameraToggled(bool enabled);
     void onVirtualCameraDeviceEdited();
     void onVirtualCameraResolutionChanged(int index);
+    void onVirtualCameraFrameRateChanged(int index);
     void onVirtualCameraError(const QString &message);
     void onVideoEffectsChanged(const FilterPreviewWidget::VideoEffectsSettings &settings);
     void onSnapshotCaptured(const QImage &image);
@@ -96,6 +97,7 @@ private:
     QList<DetectedCamera> m_detectedCameras;
     void populateCameraSelector();
     bool m_isCameraSwitch {false};
+    bool m_applyUiStatePending {false};  // A newly connected camera has yet to receive the UI state
 
     // UI
     QPushButton *m_previewToggleButton;
@@ -119,6 +121,7 @@ private:
     QCheckBox *m_virtualCameraCheckbox;
     QLineEdit *m_virtualCameraDeviceEdit;
     QComboBox *m_virtualCameraResolutionCombo;
+    QComboBox *m_virtualCameraFrameRateCombo;
     QLabel *m_virtualCameraStatusLabel;
     QLineEdit *m_snapshotDirectoryEdit;
 

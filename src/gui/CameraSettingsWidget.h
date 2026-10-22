@@ -38,6 +38,9 @@ public:
     int getSaturation() const { return m_saturationSlider->value(); }
     int getWhiteBalance() const { return m_whiteBalanceComboBox->currentData().toInt(); }
     int getWhiteBalanceKelvin() const { return m_whiteBalanceKelvinSlider->value(); }
+    bool isExposureAuto() const { return m_exposureAutoCheckBox->isChecked(); }
+    int getExposure() const { return m_exposureSlider->value(); }
+    int getISO() const { return m_isoSlider->value(); }
 
     // Setters for initializing from config
     void setHDREnabled(bool enabled) {
@@ -110,6 +113,27 @@ public:
         m_whiteBalanceKelvinSlider->blockSignals(false);
         updateWhiteBalanceKelvinLabel(clamped);
     }
+    void setExposureAuto(bool enabled) {
+        m_exposureAutoCheckBox->blockSignals(true);
+        m_exposureAutoCheckBox->setChecked(enabled);
+        m_exposureAutoCheckBox->blockSignals(false);
+        m_exposureSlider->setEnabled(!enabled);
+    }
+    void setExposure(int value) {
+        m_exposureSlider->blockSignals(true);
+        m_exposureSlider->setValue(value);
+        m_exposureSlider->blockSignals(false);
+        updateExposureValueLabel(value);
+    }
+    void setISO(int value) {
+        m_isoSlider->blockSignals(true);
+        m_isoSlider->setValue(value);
+        m_isoSlider->blockSignals(false);
+        updateISOValueLabel(value);
+    }
+
+    // Restore all advanced and image controls to factory defaults and push them to the camera
+    void resetToDefaults();
 
 private slots:
     void onHDRToggled(bool checked);
@@ -124,6 +148,9 @@ private slots:
     void onSaturationChanged(int value);
     void onWhiteBalanceChanged(int index);
     void onWhiteBalanceKelvinChanged(int value);
+    void onExposureAutoToggled(bool checked);
+    void onExposureChanged(int value);
+    void onISOChanged(int value);
 
 private:
     CameraController *m_controller;
@@ -143,6 +170,12 @@ private:
     QComboBox *m_whiteBalanceComboBox;
     QSlider *m_whiteBalanceKelvinSlider;
     QLabel *m_whiteBalanceKelvinLabel;
+    QCheckBox *m_exposureAutoCheckBox;
+    QSlider *m_exposureSlider;
+    QLabel *m_exposureValueLabel;
+    QLabel *m_isoLabel;
+    QSlider *m_isoSlider;
+    QLabel *m_isoValueLabel;
 
     bool m_userInitiated;  // Track if change was user-initiated
     QTimer *m_commandTimer;  // Debounce timer for command completion
@@ -150,10 +183,14 @@ private:
     bool m_contrastRangeApplied = false;
     bool m_saturationRangeApplied = false;
     bool m_whiteBalanceRangeApplied = false;
+    bool m_exposureRangeApplied = false;
+    bool m_isoRangeApplied = false;
 
     void applyControlRanges();
     void updateWhiteBalanceControls(int mode);
     void updateWhiteBalanceKelvinLabel(int value);
+    void updateExposureValueLabel(int value);
+    void updateISOValueLabel(int value);
 
     QGroupBox *m_advancedGroupBox;
 };

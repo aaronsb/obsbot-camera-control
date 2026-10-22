@@ -62,7 +62,14 @@ public:
     ControlRange getZoomRange();
 
     bool setAutoExposure(bool automatic);
+    bool getAutoExposure();
     bool setExposureAbsolute(int value);
+    int getExposureAbsolute();
+    ControlRange getExposureAbsoluteRange();
+
+    bool setGain(int value);
+    int getGain();
+    ControlRange getGainRange();
 
     bool setAutoFocus(bool enabled);
     bool getAutoFocus();

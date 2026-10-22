@@ -63,6 +63,9 @@ public:
         int whiteBalance;     // 0=Auto, 1=Daylight, 2=Fluorescent, etc.
         int whiteBalanceKelvin; // Manual Kelvin value (when whiteBalance==255)
         int focus;            // Manual focus position (0-100, -1 = auto)
+        bool exposureAuto;    // Auto exposure mode
+        int exposure;         // Manual shutter speed index, 9 (1/8000s) to 45 (1/2s); see ShutterSpeed.h
+        int iso;              // Sensor gain/ISO value (camera-reported range, e.g. 1-64)
 
         // Audio
         bool audioAutoGain;   // Enable auto gain control for microphones
@@ -77,6 +80,7 @@ public:
         bool virtualCameraEnabled;
         std::string virtualCameraDevice;
         std::string virtualCameraResolution;
+        int virtualCameraMaxFps; // 0 = unlimited (match capture rate)
         std::string snapshotDirectory;    // Save path for snapshots (empty = XDG default)
     };
 

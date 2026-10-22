@@ -1,4 +1,5 @@
 #include "Config.h"
+#include "ShutterSpeed.h"
 #include <fstream>
 #include <sstream>
 #include <iostream>
@@ -45,6 +46,9 @@ void Config::setDefaults()
     m_settings.whiteBalance = 0;      // Auto
     m_settings.whiteBalanceKelvin = 5000;
     m_settings.focus = -1;            // Auto focus
+    m_settings.exposureAuto = true;
+    m_settings.exposure = ShutterSpeed::kDefaultIndex; // 1/30s
+    m_settings.iso = 1;               // Lowest gain (best quality) fallback
 
     // Audio defaults
     m_settings.audioAutoGain = true;
@@ -64,6 +68,7 @@ void Config::setDefaults()
     m_settings.virtualCameraEnabled = false;
     m_settings.virtualCameraDevice = "/dev/video42";
     m_settings.virtualCameraResolution = "match";
+    m_settings.virtualCameraMaxFps = 0; // 0 = unlimited (match capture rate)
     m_settings.snapshotDirectory = "";  // Empty = XDG Pictures default
 }
 
@@ -188,8 +193,12 @@ bool Config::load(std::vector<ValidationError> &errors)
         "virtual_camera_enabled",
         "virtual_camera_device",
         "virtual_camera_resolution",
+        "virtual_camera_max_fps",
         "white_balance_kelvin",
         "focus",
+        "exposure_auto",
+        "exposure",
+        "iso",
         "snapshot_directory"
     };
 
@@ -543,6 +552,35 @@ bool Config::parseLine(const std::string &line, int lineNumber, std::vector<Vali
             addError(InvalidValue, "focus must be an integer between 0 and 100");
             return false;
         }
+    } else if (key == "exposure_auto") {
+        if (!parseBool(value, m_settings.exposureAuto)) {
+            addError(InvalidValue, "exposure_auto must be true/false or enabled/disabled");
+            return false;
+        }
+    } else if (key == "exposure") {
+        try {
+            const int exposure = std::stoi(value);
+            if (!ShutterSpeed::isValidIndex(exposure)) {
+                addError(InvalidValue, "exposure must be a shutter speed index between 9 (1/8000s) and 45 (1/2s)");
+                return false;
+            }
+            m_settings.exposure = exposure;
+        } catch (...) {
+            addError(InvalidValue, "exposure must be an integer between 9 (1/8000s) and 45 (1/2s)");
+            return false;
+        }
+    } else if (key == "iso") {
+        try {
+            const int iso = std::stoi(value);
+            if (iso < 0) {
+                addError(InvalidValue, "iso must be zero or greater");
+                return false;
+            }
+            m_settings.iso = iso;
+        } catch (...) {
+            addError(InvalidValue, "iso must be an integer");
+            return false;
+        }
     } else if (key == "audio_auto_gain") {
         if (!parseBool(value, m_settings.audioAutoGain)) {
             addError(InvalidValue, "audio_auto_gain must be true/false or enabled/disabled");
@@ -596,6 +634,23 @@ bool Config::parseLine(const std::string &line, int lineNumber, std::vector<Vali
             m_settings.virtualCameraResolution = std::to_string(width) + "x" + std::to_string(height);
         } catch (...) {
             addError(InvalidValue, "virtual_camera_resolution must be 'match' or WIDTHxHEIGHT (e.g. 1280x720)");
+            return false;
+        }
+    } else if (key == "virtual_camera_max_fps") {
+        if (value.empty()) {
+            m_settings.virtualCameraMaxFps = 0;
+            return true;
+        }
+
+        try {
+            const int fps = std::stoi(value);
+            if (fps < 0) {
+                addError(InvalidValue, "virtual_camera_max_fps must be 0 (unlimited) or greater");
+                return false;
+            }
+            m_settings.virtualCameraMaxFps = fps;
+        } catch (...) {
+            addError(InvalidValue, "virtual_camera_max_fps must be a non-negative integer");
             return false;
         }
     } else if (key == "snapshot_directory") {
@@ -689,6 +744,10 @@ bool Config::validateSettings(std::vector<ValidationError> &errors)
                 addError("virtual_camera_resolution must be 'match' or WIDTHxHEIGHT (e.g. 1280x720)");
             }
         }
+    }
+
+    if (m_settings.virtualCameraMaxFps < 0) {
+        addError("virtual_camera_max_fps must be 0 (unlimited) or greater");
     }
 
     return errors.empty();
@@ -804,6 +863,14 @@ bool Config::save()
     file << "# Manual focus position (0-100, -1 = auto)\n";
     file << "focus=" << m_settings.focus << "\n\n";
 
+    file << "# Exposure (shutter) control\n";
+    file << "exposure_auto=" << (m_settings.exposureAuto ? "enabled" : "disabled") << "\n";
+    file << "# Manual shutter speed, only used when exposure_auto=disabled. Same scale for SDK and V4L2:\n";
+    file << "# 9 = 1/8000s ... 33 = 1/30s ... 45 = 1/2s (clamped to the camera's range)\n";
+    file << "exposure=" << m_settings.exposure << "\n";
+    file << "# Sensor gain / ISO value (range reported by camera)\n";
+    file << "iso=" << m_settings.iso << "\n\n";
+
     for (size_t i = 0; i < m_settings.presets.size(); ++i) {
         const auto &preset = m_settings.presets[i];
         file << "# PTZ Preset " << (i + 1) << "\n";
@@ -828,6 +895,8 @@ bool Config::save()
     file << "virtual_camera_device=" << (m_settings.virtualCameraDevice.empty() ? "/dev/video42" : m_settings.virtualCameraDevice) << "\n";
     file << "# Set 'match' to follow the preview output, or WIDTHxHEIGHT (e.g. 1280x720)\n";
     file << "virtual_camera_resolution=" << (m_settings.virtualCameraResolution.empty() ? "match" : m_settings.virtualCameraResolution) << "\n";
+    file << "# Cap the virtual camera output frame rate (0 = unlimited, matches capture rate)\n";
+    file << "virtual_camera_max_fps=" << m_settings.virtualCameraMaxFps << "\n";
 
     file << "\n# Snapshot save directory (empty = ~/Pictures/obsbot-control/)\n";
     file << "snapshot_directory=" << m_settings.snapshotDirectory << "\n";

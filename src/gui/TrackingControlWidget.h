@@ -38,6 +38,9 @@ public:
     void setAutoZoomEnabled(bool enabled);
     void setTrackSpeed(int speedMode);
     void setAudioAutoGain(bool enabled);
+    void setFocusSettings(int focus);
+    bool isAutoFocusEnabled() const { return m_autoFocusCheckBox->isChecked(); }
+    int manualFocusValue() const { return m_focusSlider->value(); }
     int currentAiMode() const { return m_modeCombo->currentData().toInt(); }
     int currentHumanSubMode() const { return m_humanSubModeCombo->currentData().toInt(); }
     bool isAutoZoomEnabled() const { return m_autoZoomCheckBox->isChecked(); }
@@ -61,6 +64,8 @@ private slots:
     void onXYPadChanged(float x, float y);
     void onZoomChanged(int value);
     void onFocusChanged(int value);
+    void onAutoFocusToggled(bool checked);
+    void onResetManualControls();
 
 private:
     CameraController *m_controller;
@@ -82,6 +87,7 @@ private:
     QSlider *m_zoomSlider;
     QLabel *m_zoomLabel;
     QSlider *m_focusSlider;
+    QCheckBox *m_autoFocusCheckBox;
     QLabel *m_focusLabel;
     QLabel *m_positionLabel;
     QWidget *m_ptzContainer;

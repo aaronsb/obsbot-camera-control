@@ -3,6 +3,7 @@
 
 #include <QObject>
 #include <QTimer>
+#include <QDeadlineTimer>
 #include <QMap>
 #include <memory>
 #include <functional>
@@ -61,6 +62,9 @@ public:
         int saturation;      // 0-255
         int whiteBalance;    // 0=Auto, 1=Daylight, etc.
         int whiteBalanceKelvin; // Manual Kelvin value when white balance is manual
+        bool exposureAuto;   // Auto exposure mode (real hardware feature)
+        int exposure;        // Manual shutter speed index, same for SDK and V4L2 (see ShutterSpeed.h)
+        int iso;             // Sensor gain/ISO value (camera-reported range)
 
         // Status
         int zoomRatio;
@@ -123,9 +127,14 @@ public:
     bool setWhiteBalance(int mode); // 0=Auto, 1=Daylight, etc.
     bool setWhiteBalanceManual(int kelvin);
 
+    // Exposure / ISO controls
+    bool setExposureAuto(bool enabled);
+    bool setExposure(int value);
+    bool setISO(int value);
+
     // Configuration
     bool loadConfig(std::vector<Config::ValidationError> &errors);
-    bool saveConfig();
+    bool saveConfig();  // Also stores the camera state while a camera is connected
     void applyConfigToCamera();  // Apply loaded config settings to camera
     void applyCurrentStateToCamera(const CameraState &uiState);  // Apply UI state to camera
     Config& getConfig() { return m_config; }
@@ -139,6 +148,8 @@ public:
     ParamRange getContrastRange() const { return m_contrastRange; }
     ParamRange getSaturationRange() const { return m_saturationRange; }
     ParamRange getWhiteBalanceKelvinRange() const { return m_whiteBalanceKelvinRange; }
+    ParamRange getExposureRange() const { return m_exposureRange; }
+    ParamRange getISORange() const { return m_isoRange; }
     const std::vector<int>& getSupportedWhiteBalanceTypes() const { return m_supportedWhiteBalanceTypes; }
 
 signals:
@@ -165,10 +176,20 @@ private:
     ParamRange m_contrastRange;
     ParamRange m_saturationRange;
     ParamRange m_whiteBalanceKelvinRange;
+    ParamRange m_exposureRange;
+    ParamRange m_isoRange;
     std::vector<int> m_supportedWhiteBalanceTypes;
     int m_lastRequestedWhiteBalance;
     bool m_whiteBalanceFallbackActive;
     int m_fallbackWhiteBalanceMode;
+    // AI mode switches are asynchronous on the camera (the Meet 2 keeps reporting the
+    // old ai_mode for ~1-1.5s after a disable). Until the camera confirms the requested
+    // mode or this deadline passes, status polls must not overwrite it.
+    QDeadlineTimer m_pendingAiDeadline;
+    int m_pendingAiMode = 0;
+    int m_autoFramingGeneration = 0;  // Bumped per enableAutoFraming() call to cancel stale delayed commands
+    void expectAiMode(int aiMode);
+    bool aiModeMatchesPending(int reportedAiMode) const;
     bool isTiny2Family() const;
     void tryV4l2Fallback();
     void connectV4l2(const std::string &devicePath);

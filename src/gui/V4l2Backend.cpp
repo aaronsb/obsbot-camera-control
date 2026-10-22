@@ -163,10 +163,27 @@ V4l2Backend::ControlRange V4l2Backend::getZoomRange() { return queryRange(V4L2_C
 
 bool V4l2Backend::setAutoExposure(bool automatic)
 {
-    return setControl(V4L2_CID_EXPOSURE_AUTO, automatic ? V4L2_EXPOSURE_AUTO : V4L2_EXPOSURE_MANUAL);
+    if (!automatic)
+        return setControl(V4L2_CID_EXPOSURE_AUTO, V4L2_EXPOSURE_MANUAL);
+    // Many UVC cameras offer only Manual and Aperture Priority, which also sets the exposure time itself
+    return setControl(V4L2_CID_EXPOSURE_AUTO, V4L2_EXPOSURE_AUTO) ||
+           setControl(V4L2_CID_EXPOSURE_AUTO, V4L2_EXPOSURE_APERTURE_PRIORITY);
+}
+
+bool V4l2Backend::getAutoExposure()
+{
+    // "Auto" means the camera picks the exposure time, which both modes do
+    const int mode = getControl(V4L2_CID_EXPOSURE_AUTO);
+    return mode == V4L2_EXPOSURE_AUTO || mode == V4L2_EXPOSURE_APERTURE_PRIORITY;
 }
 
 bool V4l2Backend::setExposureAbsolute(int value) { return setControl(V4L2_CID_EXPOSURE_ABSOLUTE, value); }
+int V4l2Backend::getExposureAbsolute() { return getControl(V4L2_CID_EXPOSURE_ABSOLUTE); }
+V4l2Backend::ControlRange V4l2Backend::getExposureAbsoluteRange() { return queryRange(V4L2_CID_EXPOSURE_ABSOLUTE); }
+
+bool V4l2Backend::setGain(int value) { return setControl(V4L2_CID_GAIN, value); }
+int V4l2Backend::getGain() { return getControl(V4L2_CID_GAIN); }
+V4l2Backend::ControlRange V4l2Backend::getGainRange() { return queryRange(V4L2_CID_GAIN); }
 
 bool V4l2Backend::setAutoFocus(bool enabled) { return setControl(V4L2_CID_FOCUS_AUTO, enabled ? 1 : 0); }
 bool V4l2Backend::getAutoFocus() { return getControl(V4L2_CID_FOCUS_AUTO) == 1; }

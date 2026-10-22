@@ -82,6 +82,38 @@ constexpr VirtualCameraResolutionPreset kVirtualCameraResolutionPresets[] = {
     {"1920x1080", 1920, 1080}
 };
 
+struct VirtualCameraFrameRatePreset {
+    const char *key;
+    int fps;
+};
+
+constexpr VirtualCameraFrameRatePreset kVirtualCameraFrameRatePresets[] = {
+    {"match", 0},
+    {"15", 15},
+    {"24", 24},
+    {"30", 30}
+};
+
+QString buildFrameRateLabel(const VirtualCameraFrameRatePreset &preset)
+{
+    if (preset.fps <= 0) {
+        return MainWindow::tr("Match capture rate");
+    }
+
+    return MainWindow::tr("%1 fps").arg(preset.fps);
+}
+
+int frameRateForKey(const QString &key)
+{
+    if (key.isEmpty() || key.compare(QStringLiteral("match"), Qt::CaseInsensitive) == 0) {
+        return 0;
+    }
+
+    bool ok = false;
+    const int fps = key.toInt(&ok);
+    return (ok && fps > 0) ? fps : 0;
+}
+
 QString buildResolutionLabel(const VirtualCameraResolutionPreset &preset)
 {
     if (preset.width <= 0 || preset.height <= 0) {
@@ -153,6 +185,7 @@ MainWindow::MainWindow(QWidget *parent)
     , m_virtualCameraCheckbox(nullptr)
     , m_virtualCameraDeviceEdit(nullptr)
     , m_virtualCameraResolutionCombo(nullptr)
+    , m_virtualCameraFrameRateCombo(nullptr)
     , m_virtualCameraStatusLabel(nullptr)
     , m_snapshotDirectoryEdit(nullptr)
     , m_effectsWidget(nullptr)
@@ -493,6 +526,31 @@ void MainWindow::setupUI()
     virtualResolutionHint->setWordWrap(true);
     virtualResolutionHint->setStyleSheet("color: palette(mid); font-size: 11px;");
     virtualLayout->addWidget(virtualResolutionHint);
+
+    QHBoxLayout *virtualFrameRateLayout = new QHBoxLayout();
+    virtualFrameRateLayout->setContentsMargins(0, 0, 0, 0);
+    virtualFrameRateLayout->setSpacing(8);
+
+    QLabel *virtualFrameRateLabel = new QLabel(tr("Output frame rate"), virtualCameraGroup);
+    virtualFrameRateLayout->addWidget(virtualFrameRateLabel);
+
+    m_virtualCameraFrameRateCombo = new QComboBox(virtualCameraGroup);
+    m_virtualCameraFrameRateCombo->setSizeAdjustPolicy(QComboBox::AdjustToContents);
+    for (const auto &preset : kVirtualCameraFrameRatePresets) {
+        const QString key = QLatin1String(preset.key);
+        const QString label = buildFrameRateLabel(preset);
+        m_virtualCameraFrameRateCombo->addItem(label, key);
+    }
+    connect(m_virtualCameraFrameRateCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, &MainWindow::onVirtualCameraFrameRateChanged);
+    virtualFrameRateLayout->addWidget(m_virtualCameraFrameRateCombo, 1);
+
+    virtualLayout->addLayout(virtualFrameRateLayout);
+
+    QLabel *virtualFrameRateHint = new QLabel(tr("Cap the frame rate sent to apps like Teams/Zoom — useful since some camera resolutions only expose a high-fps preview option."), virtualCameraGroup);
+    virtualFrameRateHint->setWordWrap(true);
+    virtualFrameRateHint->setStyleSheet("color: palette(mid); font-size: 11px;");
+    virtualLayout->addWidget(virtualFrameRateHint);
     scrollLayout->addWidget(virtualCameraGroup);
 
     QGroupBox *snapshotGroup = new QGroupBox(tr("Snapshots"), scrollContent);
@@ -1056,6 +1114,10 @@ void MainWindow::onCameraConnected(const CameraController::CameraInfo &info)
     m_trackingWidget->setV4l2Mode(v4l2Mode);
     m_settingsWidget->setV4l2Mode(v4l2Mode);
 
+    // The camera is polled before the delayed apply below runs (by updateStatus() here and by the
+    // controller after this signal). Don't let those polls replace the UI state, i.e. the loaded
+    // settings or the user's changes, with the camera's current state before it is applied.
+    m_applyUiStatePending = !m_isCameraSwitch;
     QTimer::singleShot(100, this, [this]() {
         if (m_isCameraSwitch) {
             // Pull the new camera's actual state into the UI
@@ -1064,7 +1126,9 @@ void MainWindow::onCameraConnected(const CameraController::CameraInfo &info)
             onStateChanged(state);
             m_isCameraSwitch = false;
         } else {
-            m_controller->applyCurrentStateToCamera(getUIState());
+            const auto uiState = getUIState();
+            m_applyUiStatePending = false;
+            m_controller->applyCurrentStateToCamera(uiState);
         }
     });
 
@@ -1103,6 +1167,10 @@ void MainWindow::onCameraDisconnected()
 
 void MainWindow::onStateChanged(const CameraController::CameraState &state)
 {
+    if (m_applyUiStatePending) {
+        return;  // See onCameraConnected()
+    }
+
     // Update all widgets with new state
     m_trackingWidget->updateFromState(state);
     m_settingsWidget->updateFromState(state);
@@ -1221,6 +1289,16 @@ void MainWindow::updateVirtualCameraStreamerState()
     const QSize forcedSize = resolutionSizeForKey(resolutionKey);
     m_virtualCameraStreamer->setForcedResolution(forcedSize);
 
+    QString frameRateKey;
+    if (m_virtualCameraFrameRateCombo && m_virtualCameraFrameRateCombo->currentIndex() >= 0) {
+        frameRateKey = m_virtualCameraFrameRateCombo->currentData().toString();
+    }
+    if (frameRateKey.isEmpty()) {
+        const int savedFps = m_controller->getConfig().getSettings().virtualCameraMaxFps;
+        frameRateKey = savedFps > 0 ? QString::number(savedFps) : QStringLiteral("match");
+    }
+    m_virtualCameraStreamer->setMaxFrameRate(frameRateForKey(frameRateKey));
+
     const bool userRequested = m_virtualCameraCheckbox && m_virtualCameraCheckbox->isChecked();
     const bool previewActive = m_previewWidget && m_previewWidget->isPreviewEnabled();
     const bool enableOutput = userRequested && previewActive && m_virtualCameraAvailable;
@@ -1243,6 +1321,7 @@ void MainWindow::loadConfiguration()
     m_trackingWidget->setAutoZoomEnabled(settings.autoZoom);
     m_trackingWidget->setTrackSpeed(settings.trackSpeed);
     m_trackingWidget->setAudioAutoGain(settings.audioAutoGain);
+    m_trackingWidget->setFocusSettings(settings.focus);
     m_settingsWidget->setHDREnabled(settings.hdr);
     m_settingsWidget->setFOVMode(settings.fov);
     m_settingsWidget->setFaceAEEnabled(settings.faceAE);
@@ -1255,6 +1334,9 @@ void MainWindow::loadConfiguration()
     m_settingsWidget->setContrast(settings.contrast);
     m_settingsWidget->setSaturationAuto(settings.saturationAuto);
     m_settingsWidget->setSaturation(settings.saturation);
+    m_settingsWidget->setExposureAuto(settings.exposureAuto);
+    m_settingsWidget->setExposure(settings.exposure);
+    m_settingsWidget->setISO(settings.iso);
     m_settingsWidget->setWhiteBalance(settings.whiteBalance);
     m_previewWidget->setPreferredFormatId(QString::fromStdString(settings.previewFormat));
 
@@ -1315,6 +1397,23 @@ void MainWindow::loadConfiguration()
             m_virtualCameraResolutionCombo->setCurrentIndex(index);
         }
         m_virtualCameraResolutionCombo->blockSignals(false);
+    }
+
+    if (m_virtualCameraFrameRateCombo) {
+        const QString key = settings.virtualCameraMaxFps > 0
+            ? QString::number(settings.virtualCameraMaxFps)
+            : QStringLiteral("match");
+        m_virtualCameraFrameRateCombo->blockSignals(true);
+        int index = m_virtualCameraFrameRateCombo->findData(key);
+        if (index < 0) {
+            const QString label = tr("%1 fps").arg(settings.virtualCameraMaxFps);
+            m_virtualCameraFrameRateCombo->addItem(label, key);
+            index = m_virtualCameraFrameRateCombo->count() - 1;
+        }
+        if (index >= 0) {
+            m_virtualCameraFrameRateCombo->setCurrentIndex(index);
+        }
+        m_virtualCameraFrameRateCombo->blockSignals(false);
     }
 
     m_virtualCameraErrorNotified = false;
@@ -1384,6 +1483,8 @@ CameraController::CameraState MainWindow::getUIState() const
     state.fovMode = m_settingsWidget->getFOVMode();
     state.faceAEEnabled = m_settingsWidget->isFaceAEEnabled();
     state.faceFocusEnabled = m_settingsWidget->isFaceFocusEnabled();
+    state.autoFocusEnabled = m_trackingWidget->isAutoFocusEnabled();
+    state.manualFocusValue = m_trackingWidget->manualFocusValue();
 
     // Image controls
     state.brightnessAuto = m_settingsWidget->isBrightnessAuto();
@@ -1394,6 +1495,9 @@ CameraController::CameraState MainWindow::getUIState() const
     state.saturation = m_settingsWidget->getSaturation();
     state.whiteBalance = m_settingsWidget->getWhiteBalance();
     state.whiteBalanceKelvin = m_settingsWidget->getWhiteBalanceKelvin();
+    state.exposureAuto = m_settingsWidget->isExposureAuto();
+    state.exposure = m_settingsWidget->getExposure();
+    state.iso = m_settingsWidget->getISO();
 
     // Get PTZ state from controller (defaults from config)
     auto currentState = m_controller->getCurrentState();
@@ -1874,6 +1978,28 @@ void MainWindow::onVirtualCameraResolutionChanged(int index)
     m_controller->saveConfig();
 
     m_virtualCameraErrorNotified = false;
+    updateVirtualCameraStreamerState();
+}
+
+void MainWindow::onVirtualCameraFrameRateChanged(int index)
+{
+    if (!m_virtualCameraFrameRateCombo || index < 0) {
+        return;
+    }
+
+    const QString key = m_virtualCameraFrameRateCombo->itemData(index).toString();
+    const int fps = frameRateForKey(key);
+
+    auto settings = m_controller->getConfig().getSettings();
+    if (fps == settings.virtualCameraMaxFps) {
+        updateVirtualCameraStreamerState();
+        return;
+    }
+
+    settings.virtualCameraMaxFps = fps;
+    m_controller->getConfig().setSettings(settings);
+    m_controller->saveConfig();
+
     updateVirtualCameraStreamerState();
 }
 

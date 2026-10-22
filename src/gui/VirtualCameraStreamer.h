@@ -1,6 +1,7 @@
 #ifndef VIRTUALCAMERASTREAMER_H
 #define VIRTUALCAMERASTREAMER_H
 
+#include <QElapsedTimer>
 #include <QObject>
 #include <QImage>
 #include <QString>
@@ -33,6 +34,11 @@ public:
     void setForcedResolution(const QSize &resolution);
     QSize forcedResolution() const { return m_forcedResolution; }
 
+    // Caps how many frames per second are forwarded to the virtual camera
+    // device, independent of the capture/preview frame rate. 0 = unlimited.
+    void setMaxFrameRate(int fps);
+    int maxFrameRate() const { return m_maxFrameRate; }
+
 public slots:
     void onProcessedFrameReady(const QImage &frame);
 
@@ -45,10 +51,14 @@ private slots:
 private:
     void ensureWorker();
     void scheduleFrameDelivery(const QImage &frame);
+    bool shouldForwardFrame();
 
     QString m_devicePath;
     bool m_enabled;
     QSize m_forcedResolution;
+    int m_maxFrameRate;
+    QElapsedTimer m_frameRateTimer;
+    qint64 m_nextFrameDueNs;
     QThread *m_workerThread;
     VirtualCameraStreamerWorker *m_worker;
     bool m_workerInitialized;

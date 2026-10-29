@@ -74,7 +74,7 @@ The SDK also lists: Tiny (original), Tiny SE, Meet (original), Meet 4K, Me, Tail
 ## Requirements
 
 ### System
-- Linux (tested on Arch Linux with KDE Plasma)
+- Linux (tested on Arch Linux with KDE Plasma, NixOS)
 - OBSBOT camera (USB connection - see [Compatibility](#compatibility))
 - System tray support (KDE, GNOME, etc.)
 
@@ -123,6 +123,7 @@ The build script automatically:
 - ✅ Adds desktop launcher to your app menu
 - ✅ Offers to update your PATH if needed
 
+
 **Common Commands:**
 ```bash
 ./build.sh build --confirm    # Build only
@@ -132,6 +133,30 @@ The build script automatically:
 ```
 
 📖 **[Detailed Build Instructions →](docs/BUILD.md)** - Dependencies, manual build, troubleshooting
+
+
+### Nix flake
+
+#### Run without installing
+```bash
+nix run github:aaronsb/obsbot-camera-control
+```
+
+#### Install to NixOS config
+Add this repo as a flake.nix input:
+```nix
+inputs = {
+  obsbot-camera-control.url = "github:aaronsb/obsbot-camera-control";
+}
+```
+Then import and enable in your configuration.nix:
+```nix
+imports = [ inputs.obsbot-camera-control.nixosModules.default ];
+programs.obsbot-camera-control.enable = true;
+
+# Optional: enable the virtual camera module
+programs.obsbot-camera-control.virtualCamera.enable = true;
+```
 
 ## Usage
 

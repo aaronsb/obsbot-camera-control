@@ -34,6 +34,24 @@ TrackingControlWidget::TrackingControlWidget(CameraController *controller, QWidg
     connect(m_trackingCheckBox, &QCheckBox::toggled, this, &TrackingControlWidget::onTrackingToggled);
     groupLayout->addWidget(m_trackingCheckBox);
 
+    // Hand gesture switches (Meet 2 / Meet SE), shown once the camera reports them
+    m_gestureContainer = new QWidget(this);
+    QVBoxLayout *gestureLayout = new QVBoxLayout(m_gestureContainer);
+    gestureLayout->setContentsMargins(0, 0, 0, 0);
+    gestureLayout->setSpacing(6);
+    m_gestureFrameCheckBox = new QCheckBox(tr("Gesture toggles auto-framing"), this);
+    m_gestureFrameCheckBox->setStyleSheet("font-size: 11px;");
+    m_gestureFrameCheckBox->setToolTip(tr("A hand gesture turns auto-framing on or off"));
+    connect(m_gestureFrameCheckBox, &QCheckBox::toggled, this, &TrackingControlWidget::onGestureToggled);
+    gestureLayout->addWidget(m_gestureFrameCheckBox);
+    m_gestureZoomCheckBox = new QCheckBox(tr("Gesture zoom"), this);
+    m_gestureZoomCheckBox->setStyleSheet("font-size: 11px;");
+    m_gestureZoomCheckBox->setToolTip(tr("A raised hand makes the camera zoom in"));
+    connect(m_gestureZoomCheckBox, &QCheckBox::toggled, this, &TrackingControlWidget::onGestureToggled);
+    gestureLayout->addWidget(m_gestureZoomCheckBox);
+    m_gestureContainer->setVisible(false);
+    groupLayout->addWidget(m_gestureContainer);
+
     // Advanced controls container (Tiny 2 family)
     m_advancedContainer = new QWidget(this);
     QVBoxLayout *advancedLayout = new QVBoxLayout(m_advancedContainer);
@@ -342,6 +360,17 @@ void TrackingControlWidget::updateFromState(const CameraController::CameraState 
         }
     }
 
+    // Gesture switches: the controller holds back stale camera status itself
+    m_gestureContainer->setVisible(m_controller->hasGestureControl());
+    if (m_gestureFrameCheckBox->isChecked() != state.gestureFrameEnabled) {
+        QSignalBlocker blocker(m_gestureFrameCheckBox);
+        m_gestureFrameCheckBox->setChecked(state.gestureFrameEnabled);
+    }
+    if (m_gestureZoomCheckBox->isChecked() != state.gestureZoomEnabled) {
+        QSignalBlocker blocker(m_gestureZoomCheckBox);
+        m_gestureZoomCheckBox->setChecked(state.gestureZoomEnabled);
+    }
+
     // Sync zoom slider from camera state (only when user isn't dragging)
     if (!m_zoomSlider->isSliderDown() && !commandInFlight && !isSettling) {
         int zoomSliderVal = static_cast<int>(state.zoom * 10.0 + 0.5);
@@ -466,6 +495,12 @@ void TrackingControlWidget::onAudioGainToggled(bool checked)
     m_userInitiated = true;
     m_controller->setAudioAutoGain(checked);
     m_commandTimer->start(1000);
+}
+
+void TrackingControlWidget::onGestureToggled()
+{
+    m_controller->setGestureControl(m_gestureFrameCheckBox->isChecked(),
+                                    m_gestureZoomCheckBox->isChecked());
 }
 
 void TrackingControlWidget::updateTiny2Visibility()

@@ -5,6 +5,18 @@
 
 static constexpr int kDefaultWhiteBalanceKelvin = 4800;
 static constexpr int kSdkDetectGraceMs = 8000;
+// The SDK's cached status lags a command by two or three seconds
+static constexpr int kGestureStatusLagMs = 3000;
+
+// Meet 2 / Meet SE gesture switches. libdev exports this setter but the
+// public header leaves it out, and the documented gesture calls
+// (aiSetGestureCtrlIndividualR, aiSetGestureParaR) report success on a
+// Meet 2 without changing anything. Its parameters match
+// CameraStatus::tiny.gesture_para: gesture auto-frame, auto-frame mode,
+// gesture zoom, zoom ratio. Weak, so a libdev without it still loads.
+extern "C" int32_t _ZN6Device24cameraSetGestureControlUEbhbt(
+    Device *dev, bool autoFrame, uint8_t frameMode, bool zoom, uint16_t zoomRatio)
+    __attribute__((weak));
 
 CameraController::CameraController(QObject *parent)
     : QObject(parent)
@@ -382,6 +394,39 @@ bool CameraController::setAudioAutoGain(bool enabled)
     return success;
 }
 
+bool CameraController::hasGestureControl() const
+{
+    if (!m_connected || m_v4l2Only || !m_device) return false;
+    if (!_ZN6Device24cameraSetGestureControlUEbhbt) return false;
+    return m_cameraInfo.productType == ObsbotProdMeet2 ||
+           m_cameraInfo.productType == ObsbotProdMeetSE;
+}
+
+bool CameraController::setGestureControl(bool autoFrame, bool zoom)
+{
+    if (!hasGestureControl()) return false;
+
+    // The command sets all four fields; keep the two this app doesn't expose
+    uint8_t frameMode = static_cast<uint8_t>(m_currentState.gestureFrameMode);
+    uint16_t zoomRatio = static_cast<uint16_t>(
+        std::clamp(m_currentState.gestureZoomRatio, 100, 400));
+
+    bool success = executeCommand("Set Gesture Control", [=, this]() {
+        return _ZN6Device24cameraSetGestureControlUEbhbt(
+            m_device.get(), autoFrame, frameMode, zoom, zoomRatio);
+    });
+
+    if (success) {
+        m_currentState.gestureFrameEnabled = autoFrame;
+        m_currentState.gestureZoomEnabled = zoom;
+        m_gestureCommandTimer.start();
+        m_device->nextRefreshDevStatus();
+        emit stateChanged(m_currentState);
+    }
+
+    return success;
+}
+
 bool CameraController::setPanTilt(double pan, double tilt)
 {
     if (!m_connected) return false;
@@ -736,6 +781,15 @@ void CameraController::updateState()
     m_currentState.autoFramingEnabled = (m_currentState.aiMode != Device::AiWorkModeNone);
     m_currentState.trackSpeedMode = status.tiny.ai_tracker_speed;
     m_currentState.audioAutoGainEnabled = status.tiny.audio_auto_gain;
+
+    // Gesture settings: right after a change the status still holds the old values
+    if (!m_gestureCommandTimer.isValid() || m_gestureCommandTimer.hasExpired(kGestureStatusLagMs)) {
+        const auto &gesture = status.tiny.gesture_para;
+        m_currentState.gestureFrameEnabled = gesture.gesture_auto_frame;
+        m_currentState.gestureZoomEnabled = gesture.gesture_zoom;
+        m_currentState.gestureFrameMode = gesture.auto_frame_mode;
+        m_currentState.gestureZoomRatio = gesture.gesture_zoom_ratio;
+    }
 
     // Image controls - read current values from camera
     // Note: Preserve auto mode flags - camera doesn't have concept of "auto" for these

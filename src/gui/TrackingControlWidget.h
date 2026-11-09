@@ -56,11 +56,13 @@ private slots:
     void onAutoZoomToggled(bool checked);
     void onSpeedChanged(int index);
     void onAudioGainToggled(bool checked);
+    void onGestureToggled();
 
     // Manual PTZ control slots
     void onXYPadChanged(float x, float y);
     void onZoomChanged(int value);
     void onFocusChanged(int value);
+    void onAutoFocusToggled(bool checked);
 
 private:
     CameraController *m_controller;
@@ -71,6 +73,9 @@ private:
     QComboBox *m_speedCombo;
     QCheckBox *m_audioGainCheckBox;
     QWidget *m_advancedContainer;
+    QWidget *m_gestureContainer;
+    QCheckBox *m_gestureFrameCheckBox;
+    QCheckBox *m_gestureZoomCheckBox;
     bool m_userInitiated;  // Track if change was user-initiated
     QTimer *m_commandTimer;  // Debounce timer for command completion
     bool m_tiny2Capabilities; // flag for advanced tracking features
@@ -82,6 +87,7 @@ private:
     QSlider *m_zoomSlider;
     QLabel *m_zoomLabel;
     QSlider *m_focusSlider;
+    QCheckBox *m_autoFocusCheckBox;
     QLabel *m_focusLabel;
     QLabel *m_positionLabel;
     QWidget *m_ptzContainer;

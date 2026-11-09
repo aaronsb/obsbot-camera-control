@@ -34,6 +34,24 @@ TrackingControlWidget::TrackingControlWidget(CameraController *controller, QWidg
     connect(m_trackingCheckBox, &QCheckBox::toggled, this, &TrackingControlWidget::onTrackingToggled);
     groupLayout->addWidget(m_trackingCheckBox);
 
+    // Hand gesture switches (Meet 2 / Meet SE), shown once the camera reports them
+    m_gestureContainer = new QWidget(this);
+    QVBoxLayout *gestureLayout = new QVBoxLayout(m_gestureContainer);
+    gestureLayout->setContentsMargins(0, 0, 0, 0);
+    gestureLayout->setSpacing(6);
+    m_gestureFrameCheckBox = new QCheckBox(tr("Gesture toggles auto-framing"), this);
+    m_gestureFrameCheckBox->setStyleSheet("font-size: 11px;");
+    m_gestureFrameCheckBox->setToolTip(tr("A hand gesture turns auto-framing on or off"));
+    connect(m_gestureFrameCheckBox, &QCheckBox::toggled, this, &TrackingControlWidget::onGestureToggled);
+    gestureLayout->addWidget(m_gestureFrameCheckBox);
+    m_gestureZoomCheckBox = new QCheckBox(tr("Gesture zoom"), this);
+    m_gestureZoomCheckBox->setStyleSheet("font-size: 11px;");
+    m_gestureZoomCheckBox->setToolTip(tr("A raised hand makes the camera zoom in"));
+    connect(m_gestureZoomCheckBox, &QCheckBox::toggled, this, &TrackingControlWidget::onGestureToggled);
+    gestureLayout->addWidget(m_gestureZoomCheckBox);
+    m_gestureContainer->setVisible(false);
+    groupLayout->addWidget(m_gestureContainer);
+
     // Advanced controls container (Tiny 2 family)
     m_advancedContainer = new QWidget(this);
     QVBoxLayout *advancedLayout = new QVBoxLayout(m_advancedContainer);
@@ -155,6 +173,11 @@ TrackingControlWidget::TrackingControlWidget(CameraController *controller, QWidg
     m_focusLabel = new QLabel("50", this);
     m_focusLabel->setMinimumWidth(40);
     focusLayout->addWidget(m_focusLabel);
+    m_autoFocusCheckBox = new QCheckBox(tr("Auto"), this);
+    m_autoFocusCheckBox->setChecked(true);
+    connect(m_autoFocusCheckBox, &QCheckBox::toggled, this, &TrackingControlWidget::onAutoFocusToggled);
+    focusLayout->addWidget(m_autoFocusCheckBox);
+    m_focusSlider->setEnabled(false);
     leftColumn->addLayout(focusLayout);
 
     // Invert controls checkbox
@@ -337,6 +360,17 @@ void TrackingControlWidget::updateFromState(const CameraController::CameraState 
         }
     }
 
+    // Gesture switches: the controller holds back stale camera status itself
+    m_gestureContainer->setVisible(m_controller->hasGestureControl());
+    if (m_gestureFrameCheckBox->isChecked() != state.gestureFrameEnabled) {
+        QSignalBlocker blocker(m_gestureFrameCheckBox);
+        m_gestureFrameCheckBox->setChecked(state.gestureFrameEnabled);
+    }
+    if (m_gestureZoomCheckBox->isChecked() != state.gestureZoomEnabled) {
+        QSignalBlocker blocker(m_gestureZoomCheckBox);
+        m_gestureZoomCheckBox->setChecked(state.gestureZoomEnabled);
+    }
+
     // Sync zoom slider from camera state (only when user isn't dragging)
     if (!m_zoomSlider->isSliderDown() && !commandInFlight && !isSettling) {
         int zoomSliderVal = static_cast<int>(state.zoom * 10.0 + 0.5);
@@ -346,6 +380,14 @@ void TrackingControlWidget::updateFromState(const CameraController::CameraState 
             m_zoomSlider->blockSignals(false);
             m_zoomLabel->setText(QString("%1x").arg(zoomSliderVal / 10.0, 0, 'f', 1));
         }
+    }
+
+    // Sync auto focus checkbox; the slider only applies in manual focus
+    if (!commandInFlight && !isSettling && m_autoFocusCheckBox->isChecked() != state.autoFocusEnabled) {
+        m_autoFocusCheckBox->blockSignals(true);
+        m_autoFocusCheckBox->setChecked(state.autoFocusEnabled);
+        m_autoFocusCheckBox->blockSignals(false);
+        m_focusSlider->setEnabled(!state.autoFocusEnabled);
     }
 
     // Sync focus slider from camera state (only when user isn't dragging)
@@ -455,6 +497,12 @@ void TrackingControlWidget::onAudioGainToggled(bool checked)
     m_commandTimer->start(1000);
 }
 
+void TrackingControlWidget::onGestureToggled()
+{
+    m_controller->setGestureControl(m_gestureFrameCheckBox->isChecked(),
+                                    m_gestureZoomCheckBox->isChecked());
+}
+
 void TrackingControlWidget::updateTiny2Visibility()
 {
     if (!m_advancedContainer) {
@@ -529,6 +577,17 @@ void TrackingControlWidget::onFocusChanged(int value)
     m_dirtyFocus = true;
     m_focusLabel->setText(QString::number(value));
     scheduleFlush();
+}
+
+void TrackingControlWidget::onAutoFocusToggled(bool checked)
+{
+    m_focusSlider->setEnabled(!checked);
+    // Drop a queued manual focus so it can't switch auto focus back off
+    m_dirtyFocus = false;
+    m_userInitiated = true;
+    // Pass the slider position either way so it is kept for manual mode
+    m_controller->setFocusAbsolute(m_focusSlider->value(), checked);
+    m_commandTimer->start(1000);
 }
 
 void TrackingControlWidget::setV4l2Mode(bool v4l2Only)

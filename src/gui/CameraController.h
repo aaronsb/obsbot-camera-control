@@ -4,6 +4,7 @@
 #include <QObject>
 #include <QTimer>
 #include <QMap>
+#include <QElapsedTimer>
 #include <memory>
 #include <functional>
 #include <vector>
@@ -38,6 +39,12 @@ public:
         bool autoZoomEnabled;
         int trackSpeedMode;
         bool audioAutoGainEnabled;
+
+        // Gestures (Meet 2 / Meet SE)
+        bool gestureFrameEnabled;  // a hand gesture toggles auto-framing
+        bool gestureZoomEnabled;   // a hand gesture zooms in
+        int gestureFrameMode;      // framing used by the gesture, kept as is
+        int gestureZoomRatio;      // 100-400 (1x-4x), kept as is
 
         // PTZ
         double pan;
@@ -99,6 +106,10 @@ public:
     bool setTrackSpeed(int speedMode);
     bool setAudioAutoGain(bool enabled);
 
+    // Gesture controls (Meet 2 / Meet SE)
+    bool hasGestureControl() const;
+    bool setGestureControl(bool autoFrame, bool zoom);
+
     // PTZ controls
     bool setPanTilt(double pan, double tilt);
     bool adjustPan(double delta);
@@ -155,12 +166,14 @@ private:
     bool m_v4l2Only = false;
     V4l2Backend m_v4l2;
     QTimer *m_v4l2ScanTimer = nullptr;
+    QTimer *m_sdkDetectTimer = nullptr;  // Grace period before V4L2 fallback
     QString m_v4l2DevicePath;
     CameraInfo m_cameraInfo;
     CameraState m_currentState;
     CameraState m_cachedState;  // Cache intended state during settling
     Config m_config;
     QTimer *m_settlingTimer;  // Timer for settling period after config apply
+    QElapsedTimer m_gestureCommandTimer;  // Ignore stale gesture status after a change
     ParamRange m_brightnessRange;
     ParamRange m_contrastRange;
     ParamRange m_saturationRange;

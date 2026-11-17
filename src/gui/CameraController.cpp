@@ -52,7 +52,8 @@ void CameraController::connectToCamera(const QString &devicePath)
     // Once the V4L2 fallback has closed the SDK it never reports a device again
     // in this process, so waiting for it would only delay the reconnect.
     if (m_sdkClosed) {
-        tryV4l2Fallback();
+        if (!m_connected)
+            tryV4l2Fallback();
         return;
     }
 

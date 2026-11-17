@@ -25,8 +25,18 @@ CameraController::CameraController(QObject *parent)
     resetControlRanges();
 }
 
+// The SDK calls the device-changed callback from its own detection thread, and
+// Devices::close() can still deliver an event that was already pending. Swap in
+// a no-op so no late event reaches a controller that has moved to V4L2 or been
+// destroyed.
+static void detachSdkCallback()
+{
+    Devices::get().setDevChangedCallback([](std::string, bool, void *) {}, nullptr);
+}
+
 CameraController::~CameraController()
 {
+    detachSdkCallback();
 }
 
 void CameraController::connectToCamera()
@@ -43,7 +53,7 @@ void CameraController::connectToCamera(const QString &devicePath)
             // SDK detection runs on its own thread. Marshal the connect onto the
             // Qt/main thread so we never touch m_device or emit signals off-thread.
             QMetaObject::invokeMethod(this, [this]() {
-                if (m_connected && !m_v4l2Only) return;  // already on the SDK
+                if (m_connected) return;
                 auto dev = pickSdkDevice(Devices::get().getDevList());
                 if (dev) connectSdkDevice(dev);
             }, Qt::QueuedConnection);
@@ -150,8 +160,10 @@ void CameraController::tryV4l2Fallback()
         m_v4l2ScanTimer = new QTimer(this);
         m_v4l2ScanTimer->setSingleShot(false);
         connect(m_v4l2ScanTimer, &QTimer::timeout, this, [this]() {
-            if (m_connected)
+            if (m_connected) {
+                m_v4l2ScanTimer->stop();
                 return;
+            }
             auto path = V4l2Backend::findObsbotDevice();
             if (!path.empty()) {
                 m_v4l2ScanTimer->stop();
@@ -167,6 +179,9 @@ void CameraController::connectV4l2(const std::string &devicePath)
     if (!m_v4l2.open(devicePath))
         return;
 
+    // V4L2 owns the camera from here on. Stopping the SDK is permanent for
+    // this process, so the SDK never takes the camera back mid-session.
+    detachSdkCallback();
     Devices::get().close();
 
     m_connected = true;

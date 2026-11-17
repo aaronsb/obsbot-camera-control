@@ -1,5 +1,6 @@
 # OBSBOT Control for Linux
 
+[![Build](https://github.com/aaronsb/obsbot-camera-control/actions/workflows/build.yml/badge.svg)](https://github.com/aaronsb/obsbot-camera-control/actions/workflows/build.yml)
 ![GitHub stars](https://img.shields.io/github/stars/aaronsb/obsbot-camera-control?style=social)
 ![GitHub forks](https://img.shields.io/github/forks/aaronsb/obsbot-camera-control?style=social)
 ![AUR version](https://img.shields.io/aur/version/obsbot-camera-control?label=AUR)

@@ -1,0 +1,82 @@
+name: Build
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  ubuntu:
+    name: Ubuntu 24.04
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake \
+            qt6-base-dev qt6-multimedia-dev libqt6opengl6-dev libgl-dev
+
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Check that the binaries resolve their libraries
+        run: |
+          for bin in bin/obsbot-gui bin/obsbot-cli; do
+            test -x "$bin" || { echo "::error::$bin was not built"; exit 1; }
+            if ldd "$bin" | grep 'not found'; then
+              echo "::error::$bin has unresolved libraries"
+              exit 1
+            fi
+          done
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure --no-tests=ignore
+
+  arch:
+    name: Arch Linux
+    runs-on: ubuntu-24.04
+    container: archlinux:base-devel
+    timeout-minutes: 20
+    steps:
+      - name: Install build dependencies
+        run: pacman -Syu --noconfirm --needed cmake qt6-base qt6-multimedia git
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Check that the binaries resolve their libraries
+        run: |
+          for bin in bin/obsbot-gui bin/obsbot-cli; do
+            test -x "$bin" || { echo "::error::$bin was not built"; exit 1; }
+            if ldd "$bin" | grep 'not found'; then
+              echo "::error::$bin has unresolved libraries"
+              exit 1
+            fi
+          done
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure --no-tests=ignore

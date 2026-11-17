@@ -11,14 +11,17 @@ permissions:
 
 concurrency:
   group: build-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   ubuntu:
     name: Ubuntu 24.04
     runs-on: ubuntu-24.04
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Install build dependencies
         run: |
@@ -36,6 +39,7 @@ jobs:
       - name: Check that the binaries resolve their libraries
         run: |
           for bin in bin/obsbot-gui bin/obsbot-cli; do
+            test -x "$bin" || { echo "::error::$bin was not built"; exit 1; }
             if ldd "$bin" | grep 'not found'; then
               echo "::error::$bin has unresolved libraries"
               exit 1
@@ -49,11 +53,14 @@ jobs:
     name: Arch Linux
     runs-on: ubuntu-24.04
     container: archlinux:base-devel
+    timeout-minutes: 20
     steps:
       - name: Install build dependencies
         run: pacman -Syu --noconfirm --needed cmake qt6-base qt6-multimedia git
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Configure
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
@@ -64,6 +71,7 @@ jobs:
       - name: Check that the binaries resolve their libraries
         run: |
           for bin in bin/obsbot-gui bin/obsbot-cli; do
+            test -x "$bin" || { echo "::error::$bin was not built"; exit 1; }
             if ldd "$bin" | grep 'not found'; then
               echo "::error::$bin has unresolved libraries"
               exit 1

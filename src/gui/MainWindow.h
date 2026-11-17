@@ -54,7 +54,8 @@ private slots:
     void onPreviewStarted();
     void onPreviewFailed(const QString &error);
     void onPreviewFormatChanged(const QString &formatId);
-    void onPresetUpdated(int index, double pan, double tilt, double zoom, bool defined);
+    void onPresetUpdated(int index, double pan, double tilt, double zoom,
+                         bool defined, const QString &name);
     void onTrayIconActivated(QSystemTrayIcon::ActivationReason reason);
     void onShowHideAction();
     void onQuitAction();
@@ -133,6 +134,7 @@ private:
 
     // Status timer
     QTimer *m_statusTimer;
+    int m_pollTick;
 
     // Track preview state before minimize
     bool m_previewStateBeforeMinimize;

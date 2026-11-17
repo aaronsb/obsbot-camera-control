@@ -2,6 +2,7 @@
 #define CAMERACONTROLLER_H
 
 #include <QObject>
+#include <QElapsedTimer>
 #include <QTimer>
 #include <QMap>
 #include <memory>
@@ -51,6 +52,13 @@ public:
         bool faceFocusEnabled;
         bool autoFocusEnabled;
         int manualFocusValue;  // 0-100, motor position when in manual focus
+        int trackingStyle;
+        bool exposureAuto;
+        int exposure;
+        int antiFlicker;
+        int uvcExposure;
+        int gain;
+        int backlightCompensation;
 
         // Image controls
         bool brightnessAuto; // Auto mode for brightness
@@ -59,6 +67,8 @@ public:
         int contrast;        // 0-255
         bool saturationAuto; // Auto mode for saturation
         int saturation;      // 0-255
+        int hue;
+        int sharpness;
         int whiteBalance;    // 0=Auto, 1=Daylight, etc.
         int whiteBalanceKelvin; // Manual Kelvin value when white balance is manual
 
@@ -90,7 +100,10 @@ public:
 
     // State
     CameraState getCurrentState();
+    CameraState pollCurrentState(bool includeImageControls);
     bool hasTiny2Capabilities() const;
+    bool hasOriginalTinyCapabilities() const { return isOriginalTinyFamily(); }
+    bool hasTiny4kCapabilities() const { return isTiny4k(); }
 
     // Tracking controls
     bool enableAutoFraming(bool enabled);
@@ -112,6 +125,25 @@ public:
     bool setFaceAE(bool enabled);
     bool setFaceFocus(bool enabled);
     bool setFocusAbsolute(int position, bool autoFocus);
+    bool setTrackingStyle(int style);
+    bool setExposure(int shutterTime, bool automatic);
+    bool setAntiFlicker(int frequency);
+    bool setGestureControl(int gesture, bool enabled);
+    bool setHardwareMirror(bool enabled);
+    bool setMicrophoneDuringSleep(bool enabled);
+    bool setSleepTimeout(int seconds);
+    bool setDeviceAwake(bool awake);
+    bool setAiEnabled(bool enabled);
+    bool setVerticalMode(bool enabled);
+    bool restoreFactorySettings();
+    bool setCurrentViewAsBootPosition();
+    bool saveHardwarePreset(int id);
+    bool recallHardwarePreset(int id);
+    bool setGimbalSpeed(double pitch, double pan);
+    bool setTiny4kExposure(int value);
+    bool setTiny4kAutoExposure(bool automatic);
+    bool setTiny4kGain(int value);
+    bool setTiny4kBacklightCompensation(int value);
 
     // Image controls
     void setBrightnessAuto(bool enabled) { m_currentState.brightnessAuto = enabled; }
@@ -120,6 +152,8 @@ public:
     bool setContrast(int value);    // 0-255
     void setSaturationAuto(bool enabled) { m_currentState.saturationAuto = enabled; }
     bool setSaturation(int value);  // 0-255
+    bool setHue(int value);
+    bool setSharpness(int value);
     bool setWhiteBalance(int mode); // 0=Auto, 1=Daylight, etc.
     bool setWhiteBalanceManual(int kelvin);
 
@@ -138,6 +172,13 @@ public:
     ParamRange getBrightnessRange() const { return m_brightnessRange; }
     ParamRange getContrastRange() const { return m_contrastRange; }
     ParamRange getSaturationRange() const { return m_saturationRange; }
+    ParamRange getHueRange() const { return m_hueRange; }
+    ParamRange getSharpnessRange() const { return m_sharpnessRange; }
+    ParamRange getExposureRange() const { return m_exposureRange; }
+    ParamRange getAntiFlickerRange() const { return m_antiFlickerRange; }
+    ParamRange getTiny4kExposureRange() const { return m_uvcExposureRange; }
+    ParamRange getGainRange() const { return m_gainRange; }
+    ParamRange getBacklightCompensationRange() const { return m_backlightRange; }
     ParamRange getWhiteBalanceKelvinRange() const { return m_whiteBalanceKelvinRange; }
     const std::vector<int>& getSupportedWhiteBalanceTypes() const { return m_supportedWhiteBalanceTypes; }
 
@@ -152,6 +193,7 @@ private:
     std::shared_ptr<Device> m_device;
     bool m_connected;
     QString m_selectedDevicePath;
+    quint64 m_connectionAttempt = 0;
     bool m_v4l2Only = false;
     V4l2Backend m_v4l2;
     QTimer *m_v4l2ScanTimer = nullptr;
@@ -161,23 +203,33 @@ private:
     CameraState m_cachedState;  // Cache intended state during settling
     Config m_config;
     QTimer *m_settlingTimer;  // Timer for settling period after config apply
+    QElapsedTimer m_zoomPollingPause;
     ParamRange m_brightnessRange;
     ParamRange m_contrastRange;
     ParamRange m_saturationRange;
+    ParamRange m_hueRange;
+    ParamRange m_sharpnessRange;
+    ParamRange m_exposureRange;
+    ParamRange m_antiFlickerRange;
+    ParamRange m_uvcExposureRange;
+    ParamRange m_gainRange;
+    ParamRange m_backlightRange;
     ParamRange m_whiteBalanceKelvinRange;
     std::vector<int> m_supportedWhiteBalanceTypes;
     int m_lastRequestedWhiteBalance;
     bool m_whiteBalanceFallbackActive;
     int m_fallbackWhiteBalanceMode;
     bool isTiny2Family() const;
+    bool isOriginalTinyFamily() const;
+    bool isTiny4k() const;
     void tryV4l2Fallback();
     void connectV4l2(const std::string &devicePath);
     void refreshV4l2ControlRanges();
-    void updateV4l2State();
+    void updateV4l2State(bool includeImageControls = true);
 
     // Helper
     bool executeCommand(const QString &description, std::function<int32_t()> command);
-    void updateState();
+    void updateState(bool includeImageControls = true);
     void saveCurrentStateToConfig();  // Update config with current camera state
     void refreshControlRanges();
     void resetControlRanges();

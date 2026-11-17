@@ -1,11 +1,14 @@
 #include "VideoEffectsWidget.h"
 
+#include <algorithm>
 #include <QCheckBox>
 #include <QColorDialog>
+#include <QFont>
 #include <QFormLayout>
 #include <QGroupBox>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QPalette>
 #include <QPushButton>
 #include <QSlider>
 #include <QVBoxLayout>
@@ -52,12 +55,18 @@ VideoEffectsWidget::VideoEffectsWidget(QWidget *parent)
     , m_highlightColorButton(nullptr)
 {
     auto *rootLayout = new QVBoxLayout(this);
-    rootLayout->setContentsMargins(12, 12, 12, 12);
+    rootLayout->setContentsMargins(12, 8, 12, 12);
     rootLayout->setSpacing(12);
 
-    QLabel *infoLabel = new QLabel(tr("Creative adjustments are applied in software and do not change the camera's onboard settings."), this);
+    QLabel *infoLabel = new QLabel(
+        tr("Effects are applied only to the preview, snapshots, and virtual camera. "
+           "They do not change the physical camera output."),
+        this);
     infoLabel->setWordWrap(true);
-    infoLabel->setStyleSheet("color: palette(mid); font-size: 11px;");
+    infoLabel->setForegroundRole(QPalette::PlaceholderText);
+    QFont infoFont = infoLabel->font();
+    infoFont.setPointSizeF(std::max(1.0, infoFont.pointSizeF() - 1.0));
+    infoLabel->setFont(infoFont);
     rootLayout->addWidget(infoLabel);
 
     auto addSlider = [&](QVBoxLayout *groupLayout, const QString &label, float min, float max, float initial, std::function<void(float)> setter) {
@@ -194,7 +203,7 @@ VideoEffectsWidget::VideoEffectsWidget(QWidget *parent)
     QVBoxLayout *orientationLayout = new QVBoxLayout(orientationGroup);
     orientationLayout->setSpacing(6);
 
-    m_horizontalFlipCheckBox = new QCheckBox(tr("Mirror (horizontal flip)"), orientationGroup);
+    m_horizontalFlipCheckBox = new QCheckBox(tr("Mirror"), orientationGroup);
     m_horizontalFlipCheckBox->setChecked(m_settings.horizontalFlip);
     connect(m_horizontalFlipCheckBox, &QCheckBox::toggled, this, [this](bool checked) {
         m_settings.horizontalFlip = checked;

@@ -1,5 +1,8 @@
 #include "TrackingControlWidget.h"
+#include <algorithm>
+#include <QFont>
 #include <QLabel>
+#include <QPalette>
 #include <dev/dev.hpp>
 
 TrackingControlWidget::TrackingControlWidget(CameraController *controller, QWidget *parent)
@@ -10,6 +13,10 @@ TrackingControlWidget::TrackingControlWidget(CameraController *controller, QWidg
     // Create debounce timer for command completion
     m_commandTimer = new QTimer(this);
     m_commandTimer->setSingleShot(true);
+    connect(m_commandTimer, &QTimer::timeout, this, [this]() {
+        if (m_controller->isConnected())
+            m_controller->saveConfig();
+    });
 
     // Unified throttle for all manual controls (pan/tilt, zoom, focus)
     m_controlThrottle = new QTimer(this);
@@ -20,19 +27,43 @@ TrackingControlWidget::TrackingControlWidget(CameraController *controller, QWidg
     m_tiny2Capabilities = m_controller->hasTiny2Capabilities();
 
     QVBoxLayout *layout = new QVBoxLayout(this);
-    layout->setContentsMargins(8, 14, 8, 14);
+    layout->setContentsMargins(8, 8, 8, 14);
     layout->setSpacing(14);
 
-    m_trackingGroupBox = new QGroupBox("Face Tracking", this);
-    m_trackingGroupBox->setFlat(true);
+    m_trackingGroupBox = new QGroupBox("AI Tracking", this);
     QVBoxLayout *groupLayout = new QVBoxLayout(m_trackingGroupBox);
     groupLayout->setContentsMargins(16, 16, 16, 16);
     groupLayout->setSpacing(12);
 
-    m_trackingCheckBox = new QCheckBox("Enable Auto-Framing", this);
+    m_trackingCheckBox = new QPushButton("Enable", this);
+    m_trackingCheckBox->setCheckable(true);
     m_trackingCheckBox->setStyleSheet("font-weight: 600; font-size: 14px;");
-    connect(m_trackingCheckBox, &QCheckBox::toggled, this, &TrackingControlWidget::onTrackingToggled);
+    connect(m_trackingCheckBox, &QPushButton::toggled,
+            this, &TrackingControlWidget::onTrackingToggled);
     groupLayout->addWidget(m_trackingCheckBox);
+
+    m_originalTinyContainer = new QWidget(this);
+    QHBoxLayout *originalTinyLayout = new QHBoxLayout(m_originalTinyContainer);
+    originalTinyLayout->setContentsMargins(0, 8, 0, 0);
+    static const char *trackingStyleLabels[] = {
+        "Headroom", "Standard", "Motion"
+    };
+    static constexpr int trackingStyles[] = {
+        Device::AiVTrackHeadroom,
+        Device::AiVTrackStandard,
+        Device::AiVTrackMotion
+    };
+    for (int position = 0; position < 3; ++position) {
+        const int style = trackingStyles[position];
+        m_trackingStyleButtons[style] =
+            new QPushButton(trackingStyleLabels[position], this);
+        m_trackingStyleButtons[style]->setCheckable(true);
+        connect(m_trackingStyleButtons[style], &QPushButton::clicked,
+                this, [this, style]() { onTrackingStyleChanged(style); });
+        originalTinyLayout->addWidget(m_trackingStyleButtons[style], 1);
+    }
+    setTrackingStyle(Device::AiVTrackStandard);
+    groupLayout->addWidget(m_originalTinyContainer);
 
     // Advanced controls container (Tiny 2 family)
     m_advancedContainer = new QWidget(this);
@@ -105,14 +136,74 @@ TrackingControlWidget::TrackingControlWidget(CameraController *controller, QWidg
 
     layout->addWidget(m_trackingGroupBox);
 
-    // Manual PTZ Controls (disabled when auto-framing is enabled)
+    // Zoom remains available while auto-framing is enabled.
+    QWidget *zoomControls = new QWidget(this);
+    QVBoxLayout *zoomGroupLayout = new QVBoxLayout(zoomControls);
+    zoomGroupLayout->setContentsMargins(0, 12, 0, 0);
+    zoomGroupLayout->setSpacing(8);
+
+    QHBoxLayout *zoomLayout = new QHBoxLayout();
+    m_zoomSlider = new QSlider(Qt::Horizontal, this);
+    m_zoomSlider->setMinimum(100);  // 1.00x
+    m_zoomSlider->setMaximum(200);  // 2.00x
+    m_zoomSlider->setValue(100);
+    connect(m_zoomSlider, &QSlider::valueChanged,
+            this, &TrackingControlWidget::onZoomChanged);
+    zoomLayout->addWidget(m_zoomSlider, 1);
+    m_zoomLabel = new QLabel("1.00x", this);
+    m_zoomLabel->setMinimumWidth(40);
+    zoomLayout->addWidget(m_zoomLabel);
+    zoomGroupLayout->addLayout(zoomLayout);
+
+    QHBoxLayout *fovLayout = new QHBoxLayout();
+    static const char *fovLabels[] = {
+        "86°", "78°", "65°"
+    };
+    for (int mode = 0; mode < 3; ++mode) {
+        m_fovButtons[mode] = new QPushButton(fovLabels[mode], this);
+        m_fovButtons[mode]->setCheckable(true);
+        connect(m_fovButtons[mode], &QPushButton::clicked, this, [this, mode]() {
+            m_userInitiated = true;
+            m_controller->setFOV(mode);
+            m_commandTimer->start(1000);
+        });
+        fovLayout->addWidget(m_fovButtons[mode]);
+    }
+    zoomGroupLayout->addLayout(fovLayout);
+
+    // Focus remains available while auto-framing is enabled.
+    m_focusGroupBox = new QGroupBox("Focus", this);
+    QVBoxLayout *focusGroupLayout = new QVBoxLayout(m_focusGroupBox);
+    focusGroupLayout->setContentsMargins(16, 16, 16, 16);
+    focusGroupLayout->setSpacing(8);
+
+    m_faceFocusCheckBox = new QCheckBox("Face-based Auto Focus", this);
+    m_faceFocusCheckBox->setToolTip("Optimize focus for faces");
+    connect(m_faceFocusCheckBox, &QCheckBox::toggled,
+            this, &TrackingControlWidget::onFaceFocusToggled);
+    focusGroupLayout->addWidget(m_faceFocusCheckBox);
+
+    QHBoxLayout *focusLayout = new QHBoxLayout();
+    m_focusSlider = new QSlider(Qt::Horizontal, this);
+    m_focusSlider->setMinimum(0);
+    m_focusSlider->setMaximum(100);
+    m_focusSlider->setValue(50);
+    connect(m_focusSlider, &QSlider::valueChanged,
+            this, &TrackingControlWidget::onFocusChanged);
+    focusLayout->addWidget(m_focusSlider, 1);
+    m_focusLabel = new QLabel("50", this);
+    m_focusLabel->setMinimumWidth(40);
+    focusLayout->addWidget(m_focusLabel);
+    focusGroupLayout->addLayout(focusLayout);
+    layout->addWidget(m_focusGroupBox);
+
+    // Manual pan/tilt controls (disabled when auto-framing is enabled)
     m_ptzContainer = new QWidget(this);
     QVBoxLayout *ptzContainerLayout = new QVBoxLayout(m_ptzContainer);
     ptzContainerLayout->setContentsMargins(0, 0, 0, 0);
     ptzContainerLayout->setSpacing(0);
 
-    QGroupBox *ptzGroupBox = new QGroupBox("Manual Camera Control", this);
-    ptzGroupBox->setFlat(true);
+    QGroupBox *ptzGroupBox = new QGroupBox("Vision and Gimbal", this);
     QVBoxLayout *ptzGroupLayout = new QVBoxLayout(ptzGroupBox);
     ptzGroupLayout->setContentsMargins(16, 16, 16, 16);
     ptzGroupLayout->setSpacing(12);
@@ -121,70 +212,40 @@ TrackingControlWidget::TrackingControlWidget(CameraController *controller, QWidg
     QHBoxLayout *columnsLayout = new QHBoxLayout();
     columnsLayout->setSpacing(16);
 
-    // Left column: sliders and checkboxes
-    QVBoxLayout *leftColumn = new QVBoxLayout();
-    leftColumn->addStretch();
+    m_gimbalControlGroup = new QGroupBox(tr("Gimbal Control"), this);
+    QVBoxLayout *gimbalSettingsLayout =
+        new QVBoxLayout(m_gimbalControlGroup);
+    gimbalSettingsLayout->setContentsMargins(16, 16, 16, 16);
+    m_invertXCheckBox = new QCheckBox(tr("Invert X"), m_gimbalControlGroup);
+    m_invertYCheckBox = new QCheckBox(tr("Invert Y"), m_gimbalControlGroup);
+    gimbalSettingsLayout->addWidget(m_invertXCheckBox);
+    gimbalSettingsLayout->addWidget(m_invertYCheckBox);
+    auto emitInversion = [this]() {
+        emit invertControlsChanged(
+            m_invertXCheckBox->isChecked(),
+            m_invertYCheckBox->isChecked());
+    };
+    connect(m_invertXCheckBox, &QCheckBox::toggled, this, emitInversion);
+    connect(m_invertYCheckBox, &QCheckBox::toggled, this, emitInversion);
 
-    // Zoom slider
-    QHBoxLayout *zoomLayout = new QHBoxLayout();
-    QLabel *zoomLabel = new QLabel("Zoom:", this);
-    zoomLabel->setFixedWidth(40);
-    zoomLayout->addWidget(zoomLabel);
-    m_zoomSlider = new QSlider(Qt::Horizontal, this);
-    m_zoomSlider->setMinimum(100);  // 1.00x
-    m_zoomSlider->setMaximum(200);  // 2.00x
-    m_zoomSlider->setValue(100);
-    connect(m_zoomSlider, &QSlider::valueChanged, this, &TrackingControlWidget::onZoomChanged);
-    zoomLayout->addWidget(m_zoomSlider);
-    m_zoomLabel = new QLabel("1.0x", this);
-    m_zoomLabel->setMinimumWidth(40);
-    zoomLayout->addWidget(m_zoomLabel);
-    leftColumn->addLayout(zoomLayout);
-
-    // Focus slider
-    QHBoxLayout *focusLayout = new QHBoxLayout();
-    QLabel *focusLabel = new QLabel("Focus:", this);
-    focusLabel->setFixedWidth(40);
-    focusLayout->addWidget(focusLabel);
-    m_focusSlider = new QSlider(Qt::Horizontal, this);
-    m_focusSlider->setMinimum(0);
-    m_focusSlider->setMaximum(100);
-    m_focusSlider->setValue(50);
-    connect(m_focusSlider, &QSlider::valueChanged, this, &TrackingControlWidget::onFocusChanged);
-    focusLayout->addWidget(m_focusSlider);
-    m_focusLabel = new QLabel("50", this);
-    m_focusLabel->setMinimumWidth(40);
-    focusLayout->addWidget(m_focusLabel);
-    leftColumn->addLayout(focusLayout);
-
-    // Invert controls checkbox
-    m_invertControlsCheckBox = new QCheckBox(tr("Invert controls"), this);
-    m_invertControlsCheckBox->setStyleSheet("font-size: 10px;");
-    leftColumn->addWidget(m_invertControlsCheckBox);
-
-    // Mirror checkbox — syncs with Creative FX horizontal flip
-    m_mirrorCheckBox = new QCheckBox(tr("Mirror view"), this);
-    m_mirrorCheckBox->setStyleSheet("font-size: 10px;");
-    connect(m_mirrorCheckBox, &QCheckBox::toggled, this, [this](bool checked) {
-        emit mirrorToggled(checked);
-    });
-    leftColumn->addWidget(m_mirrorCheckBox);
-
-    leftColumn->addStretch();
-    columnsLayout->addLayout(leftColumn, 1);
-
-    // Right column: XY pad for pan/tilt
+    // Centered XY pad for pan/tilt
     m_xyPad = new XYPad(this);
     connect(m_xyPad, &XYPad::positionChanged, this, &TrackingControlWidget::onXYPadChanged);
+    columnsLayout->addStretch(1);
     columnsLayout->addWidget(m_xyPad);
+    columnsLayout->addStretch(1);
 
     ptzGroupLayout->addLayout(columnsLayout);
 
     // Position label (full width below both columns)
     m_positionLabel = new QLabel("Position: Pan 0.00, Tilt 0.00", this);
     m_positionLabel->setAlignment(Qt::AlignCenter);
-    m_positionLabel->setStyleSheet("color: palette(mid); font-size: 11px;");
+    m_positionLabel->setForegroundRole(QPalette::PlaceholderText);
+    QFont positionFont = m_positionLabel->font();
+    positionFont.setPointSizeF(std::max(1.0, positionFont.pointSizeF() - 1.0));
+    m_positionLabel->setFont(positionFont);
     ptzGroupLayout->addWidget(m_positionLabel);
+    ptzGroupLayout->addWidget(zoomControls);
 
     ptzContainerLayout->addWidget(ptzGroupBox);
     layout->addWidget(m_ptzContainer);
@@ -193,6 +254,29 @@ TrackingControlWidget::TrackingControlWidget(CameraController *controller, QWidg
     updatePTZControlsState();
 
     layout->addStretch();
+}
+
+void TrackingControlWidget::setPositionPresetsWidget(QWidget *widget)
+{
+    if (!widget) {
+        return;
+    }
+    if (QWidget *oldParent = widget->parentWidget()) {
+        if (QLayout *oldLayout = oldParent->layout()) {
+            oldLayout->removeWidget(widget);
+        }
+    }
+    if (auto *pageLayout = qobject_cast<QVBoxLayout*>(layout())) {
+        pageLayout->insertWidget(0, widget);
+    }
+}
+
+void TrackingControlWidget::setInvertControls(bool invertX, bool invertY)
+{
+    QSignalBlocker blockX(m_invertXCheckBox);
+    QSignalBlocker blockY(m_invertYCheckBox);
+    m_invertXCheckBox->setChecked(invertX);
+    m_invertYCheckBox->setChecked(invertY);
 }
 
 void TrackingControlWidget::setAiMode(int mode)
@@ -220,6 +304,13 @@ void TrackingControlWidget::setAutoZoomEnabled(bool enabled)
     m_autoZoomCheckBox->setChecked(enabled);
 }
 
+void TrackingControlWidget::setFaceFocusEnabled(bool enabled)
+{
+    QSignalBlocker blocker(m_faceFocusCheckBox);
+    m_faceFocusCheckBox->setChecked(enabled);
+    m_focusSlider->setEnabled(!enabled);
+}
+
 void TrackingControlWidget::setTrackSpeed(int speedMode)
 {
     int idx = m_speedCombo->findData(speedMode);
@@ -238,6 +329,7 @@ void TrackingControlWidget::setAudioAutoGain(bool enabled)
 void TrackingControlWidget::onTrackingToggled(bool checked)
 {
     m_userInitiated = true;
+    m_trackingCheckBox->setText(checked ? "Disable" : "Enable");
 
     if (m_tiny2Capabilities) {
         int modeValue = m_modeCombo->currentData().toInt();
@@ -287,15 +379,21 @@ void TrackingControlWidget::updateFromState(const CameraController::CameraState 
         m_trackingCheckBox->setChecked(shouldBeChecked);
         m_trackingCheckBox->blockSignals(false);
     }
+    m_trackingCheckBox->setText(
+        m_trackingCheckBox->isChecked() ? "Disable" : "Enable");
 
     if (!m_userInitiated && !commandInFlight && !isSettling) {
         updatePTZControlsState();
     }
 
-    bool tiny2 = m_controller->hasTiny2Capabilities();
-    if (tiny2 != m_tiny2Capabilities) {
-        m_tiny2Capabilities = tiny2;
-        updateTiny2Visibility();
+    // Connection capabilities are unknown when this widget is constructed.
+    // Refresh both Tiny2 and original-Tiny containers after every state
+    // update so a late SDK connection can reveal the correct controls.
+    updateTiny2Visibility();
+
+    if (m_controller->hasOriginalTinyCapabilities()
+            && !m_userInitiated && !commandInFlight && !isSettling) {
+        setTrackingStyle(state.trackingStyle);
     }
 
     if (m_tiny2Capabilities && !m_userInitiated && !commandInFlight && !isSettling) {
@@ -337,19 +435,17 @@ void TrackingControlWidget::updateFromState(const CameraController::CameraState 
         }
     }
 
-    // Sync zoom slider from camera state (only when user isn't dragging)
-    if (!m_zoomSlider->isSliderDown() && !commandInFlight && !isSettling) {
-        int zoomSliderVal = static_cast<int>(state.zoom * 10.0 + 0.5);
-        if (m_zoomSlider->value() != zoomSliderVal) {
-            m_zoomSlider->blockSignals(true);
-            m_zoomSlider->setValue(zoomSliderVal);
-            m_zoomSlider->blockSignals(false);
-            m_zoomLabel->setText(QString("%1x").arg(zoomSliderVal / 10.0, 0, 'f', 1));
-        }
+    if (!commandInFlight && !isSettling
+            && m_faceFocusCheckBox->isChecked() != state.faceFocusEnabled) {
+        QSignalBlocker blocker(m_faceFocusCheckBox);
+        m_faceFocusCheckBox->setChecked(state.faceFocusEnabled);
     }
+    m_focusSlider->setEnabled(!state.faceFocusEnabled);
 
-    // Sync focus slider from camera state (only when user isn't dragging)
-    if (!m_focusSlider->isSliderDown() && !commandInFlight && !isSettling) {
+    // Face autofocus keeps reporting the current motor position even though
+    // the slider is read-only.
+    if (!m_focusSlider->isSliderDown()
+            && (!commandInFlight || state.faceFocusEnabled) && !isSettling) {
         if (m_focusSlider->value() != state.manualFocusValue) {
             m_focusSlider->blockSignals(true);
             m_focusSlider->setValue(state.manualFocusValue);
@@ -369,15 +465,23 @@ void TrackingControlWidget::updateFromState(const CameraController::CameraState 
         }
     }
 
+    if (!commandInFlight && !isSettling) {
+        static constexpr int presetZoom[] = {100, 105, 115};
+        const int currentZoom = qRound(state.zoom * 100.0);
+        for (int mode = 0; mode < 3; ++mode) {
+            m_fovButtons[mode]->blockSignals(true);
+            m_fovButtons[mode]->setChecked(currentZoom == presetZoom[mode]);
+            m_fovButtons[mode]->blockSignals(false);
+        }
+    }
+
     // Sync XY pad and position label from camera state (skip during active drag)
     if (!m_xyPad->isDragging() && !commandInFlight && !isSettling) {
         float padX = state.pan;
         float padY = state.tilt;
         // XY pad shows control position, so invert back when invert is active
-        if (m_invertControlsCheckBox->isChecked()) {
-            padX = -padX;
-            padY = -padY;
-        }
+        if (m_invertXCheckBox->isChecked()) padX = -padX;
+        if (m_invertYCheckBox->isChecked()) padY = -padY;
         m_xyPad->setPosition(padX, padY);
         m_positionLabel->setText(QString("Position: Pan %1, Tilt %2")
             .arg(state.pan, 0, 'f', 2)
@@ -455,13 +559,42 @@ void TrackingControlWidget::onAudioGainToggled(bool checked)
     m_commandTimer->start(1000);
 }
 
+void TrackingControlWidget::setTrackingStyle(int style)
+{
+    if (style < Device::AiVTrackStandard || style > Device::AiVTrackMotion) {
+        return;
+    }
+    m_trackingStyle = style;
+    for (int buttonStyle = 0; buttonStyle < 3; ++buttonStyle) {
+        QSignalBlocker blocker(m_trackingStyleButtons[buttonStyle]);
+        m_trackingStyleButtons[buttonStyle]->setChecked(buttonStyle == style);
+    }
+}
+
+void TrackingControlWidget::onTrackingStyleChanged(int style)
+{
+    if (style < Device::AiVTrackStandard || style > Device::AiVTrackMotion
+            || !m_controller->hasOriginalTinyCapabilities()) {
+        return;
+    }
+    m_userInitiated = true;
+    setTrackingStyle(style);
+    m_controller->setTrackingStyle(style);
+    m_commandTimer->start(1000);
+}
+
 void TrackingControlWidget::updateTiny2Visibility()
 {
     if (!m_advancedContainer) {
         return;
     }
 
+    // Re-read on every pass: the constructor runs before a camera is
+    // connected, so a value captured once there can never become true.
+    m_tiny2Capabilities = m_controller->hasTiny2Capabilities();
+
     m_advancedContainer->setVisible(m_tiny2Capabilities);
+    m_originalTinyContainer->setVisible(m_controller->hasOriginalTinyCapabilities());
     m_humanSubModeCombo->setEnabled(m_tiny2Capabilities && m_modeCombo->currentData().toInt() == Device::AiWorkModeHuman);
 }
 
@@ -469,7 +602,9 @@ void TrackingControlWidget::updatePTZControlsState()
 {
     // Disable PTZ controls when auto-framing is enabled
     bool enabled = !m_trackingCheckBox->isChecked();
-    m_ptzContainer->setEnabled(enabled);
+    m_xyPad->setEnabled(enabled);
+    m_positionLabel->setEnabled(enabled);
+    m_originalTinyContainer->setEnabled(!enabled);
 }
 
 void TrackingControlWidget::flushPendingCommands()
@@ -490,6 +625,7 @@ void TrackingControlWidget::flushPendingCommands()
 
 void TrackingControlWidget::scheduleFlush()
 {
+    m_commandTimer->start(1000);
     // First change fires immediately, subsequent ones coalesce at 100ms
     if (!m_controlThrottle->isActive()) {
         flushPendingCommands();
@@ -499,10 +635,8 @@ void TrackingControlWidget::scheduleFlush()
 
 void TrackingControlWidget::onXYPadChanged(float x, float y)
 {
-    if (m_invertControlsCheckBox->isChecked()) {
-        x = -x;
-        y = -y;
-    }
+    if (m_invertXCheckBox->isChecked()) x = -x;
+    if (m_invertYCheckBox->isChecked()) y = -y;
 
     m_pendingPan = x;
     m_pendingTilt = y;
@@ -531,17 +665,15 @@ void TrackingControlWidget::onFocusChanged(int value)
     scheduleFlush();
 }
 
+void TrackingControlWidget::onFaceFocusToggled(bool checked)
+{
+    m_userInitiated = true;
+    m_focusSlider->setEnabled(!checked);
+    m_controller->setFaceFocus(checked);
+    m_commandTimer->start(1000);
+}
+
 void TrackingControlWidget::setV4l2Mode(bool v4l2Only)
 {
     m_trackingGroupBox->setVisible(!v4l2Only);
-}
-
-void TrackingControlWidget::setMirrored(bool mirrored)
-{
-    // Sync checkbox without re-emitting mirrorToggled
-    if (m_mirrorCheckBox->isChecked() != mirrored) {
-        m_mirrorCheckBox->blockSignals(true);
-        m_mirrorCheckBox->setChecked(mirrored);
-        m_mirrorCheckBox->blockSignals(false);
-    }
 }

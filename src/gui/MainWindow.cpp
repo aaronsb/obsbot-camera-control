@@ -161,6 +161,7 @@ MainWindow::MainWindow(QWidget *parent)
     , m_snapshotToClipboard(false)
     , m_virtualCameraErrorNotified(false)
     , m_virtualCameraAvailable(false)
+    , m_pollTick(3)
 {
     setWindowTitle("OBSBOT Control");
     setWindowIcon(QIcon(":/icons/camera.svg"));
@@ -210,7 +211,7 @@ MainWindow::MainWindow(QWidget *parent)
     // Update status periodically
     m_statusTimer = new QTimer(this);
     connect(m_statusTimer, &QTimer::timeout, this, &MainWindow::updateStatus);
-    m_statusTimer->start(2000);
+    m_statusTimer->start(500);
 }
 
 MainWindow::~MainWindow()
@@ -305,7 +306,7 @@ void MainWindow::setupUI()
     m_previewStack->addWidget(m_previewPlaceholder);
     m_previewStack->setCurrentWidget(m_previewPlaceholder);
 
-    // Control column (scrollable so window can be smaller)
+    // Control column: status and tab bar stay fixed; each tab scrolls itself.
     m_controlCard = new QFrame(m_splitter);
     m_controlCard->setObjectName("controlCard");
     m_controlCard->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Expanding);
@@ -315,18 +316,11 @@ void MainWindow::setupUI()
     controlLayout->setContentsMargins(0, 0, 0, 0);
     controlLayout->setSpacing(0);
 
-    QScrollArea *controlScroll = new QScrollArea(m_controlCard);
-    controlScroll->setObjectName("controlScroll");
-    controlScroll->setWidgetResizable(true);
-    controlScroll->setFrameShape(QFrame::NoFrame);
-    controlScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    controlScroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
-
-    QWidget *scrollContent = new QWidget(controlScroll);
+    QWidget *scrollContent = new QWidget(m_controlCard);
     scrollContent->setMinimumWidth(0);  // allow shrinking to viewport so content is not clipped
     QVBoxLayout *scrollLayout = new QVBoxLayout(scrollContent);
     scrollLayout->setContentsMargins(18, 20, 18, 20);
-    scrollLayout->setSpacing(18);
+    scrollLayout->setSpacing(12);
 
     m_statusBanner = new QFrame(scrollContent);
     m_statusBanner->setObjectName("statusBanner");
@@ -335,25 +329,61 @@ void MainWindow::setupUI()
     statusLayout->setContentsMargins(16, 18, 16, 16);
     statusLayout->setSpacing(10);
 
-    QHBoxLayout *statusHeader = new QHBoxLayout();
-    statusHeader->setContentsMargins(0, 0, 0, 0);
-    statusHeader->setSpacing(10);
-    m_statusChip = new QLabel(tr("Camera • Offline"), m_statusBanner);
+    QHBoxLayout *statusMainLayout = new QHBoxLayout();
+    statusMainLayout->setContentsMargins(0, 0, 0, 0);
+    statusMainLayout->setSpacing(10);
+
+    m_statusChip = new QLabel(m_statusBanner);
     m_statusChip->setObjectName("statusChip");
-    statusHeader->addWidget(m_statusChip);
-    statusHeader->addStretch();
-    statusLayout->addLayout(statusHeader);
+    m_statusChip->setFixedSize(12, 12);
+    statusMainLayout->addWidget(m_statusChip, 0, Qt::AlignVCenter);
 
     m_deviceInfoLabel = new QLabel(tr("Connecting to camera..."), m_statusBanner);
     m_deviceInfoLabel->setObjectName("deviceInfoLabel");
     m_deviceInfoLabel->setWordWrap(true);
-    statusLayout->addWidget(m_deviceInfoLabel);
+    statusMainLayout->addWidget(m_deviceInfoLabel, 1);
+
+    QWidget *actionRow = new QWidget(m_statusBanner);
+    actionRow->setObjectName("actionRow");
+    QHBoxLayout *actionLayout = new QHBoxLayout(actionRow);
+    actionLayout->setContentsMargins(0, 0, 0, 0);
+    actionLayout->setSpacing(14);
+
+    m_previewToggleButton = new QPushButton(tr("Start Preview"), actionRow);
+    m_previewToggleButton->setObjectName("primaryAction");
+    m_previewToggleButton->setCheckable(true);
+    connect(m_previewToggleButton, &QPushButton::toggled,
+            this, &MainWindow::onTogglePreview);
+    actionLayout->addWidget(m_previewToggleButton, 1);
+
+    m_reconnectButton = new QPushButton(tr("Reconnect"), actionRow);
+    m_reconnectButton->setObjectName("secondaryAction");
+    connect(m_reconnectButton, &QPushButton::clicked, this, [this]() {
+        m_controller->disconnectFromCamera();
+        m_deviceInfoLabel->setText(tr("Connecting to camera..."));
+        m_statusLabel->setText(tr("Status: Connecting..."));
+        updateStatusBanner(false);
+        // Let Qt paint the connecting state before SDK discovery starts. If
+        // the SDK already has the camera cached, connectToCamera() can emit
+        // cameraConnected synchronously and otherwise skip this visible state.
+        QTimer::singleShot(100, this, [this]() {
+            m_controller->connectToCamera();
+        });
+    });
+    actionLayout->addWidget(m_reconnectButton);
+    statusMainLayout->addWidget(actionRow, 0, Qt::AlignVCenter);
+    statusLayout->addLayout(statusMainLayout);
 
     m_cameraWarningLabel = new QLabel(QString(), m_statusBanner);
     m_cameraWarningLabel->setObjectName("warningLabel");
     m_cameraWarningLabel->setWordWrap(true);
     m_cameraWarningLabel->setVisible(false);
     statusLayout->addWidget(m_cameraWarningLabel);
+
+    m_statusLabel = new QLabel(tr("Status: Initializing..."), m_statusBanner);
+    m_statusLabel->setObjectName("footerStatus");
+    m_statusLabel->setWordWrap(true);
+    statusLayout->addWidget(m_statusLabel);
 
     scrollLayout->addWidget(m_statusBanner);
 
@@ -380,63 +410,65 @@ void MainWindow::setupUI()
     }
     populateCameraSelector();
 
-    QWidget *actionRow = new QWidget(scrollContent);
-    actionRow->setObjectName("actionRow");
-    QHBoxLayout *actionLayout = new QHBoxLayout(actionRow);
-    actionLayout->setContentsMargins(0, 0, 0, 0);
-    actionLayout->setSpacing(14);
-
-    m_previewToggleButton = new QPushButton(tr("Start Preview"), actionRow);
-    m_previewToggleButton->setObjectName("primaryAction");
-    m_previewToggleButton->setCheckable(true);
-    connect(m_previewToggleButton, &QPushButton::toggled,
-            this, &MainWindow::onTogglePreview);
-    actionLayout->addWidget(m_previewToggleButton, 1);
-
-    m_reconnectButton = new QPushButton(tr("Reconnect"), actionRow);
-    m_reconnectButton->setObjectName("secondaryAction");
-    connect(m_reconnectButton, &QPushButton::clicked, this, [this]() {
-        m_controller->disconnectFromCamera();
-        m_controller->connectToCamera();
-    });
-    actionLayout->addWidget(m_reconnectButton);
-
-    scrollLayout->addWidget(actionRow);
-
     m_trackingWidget = new TrackingControlWidget(m_controller, this);
     m_ptzWidget = new PTZControlWidget(m_controller, this);
     m_settingsWidget = new CameraSettingsWidget(m_controller, this);
     m_ptzWidget->setCameraSettingsWidget(m_settingsWidget);
+    m_trackingWidget->setPositionPresetsWidget(
+        m_ptzWidget->positionPresetsGroup());
+    m_settingsWidget->insertWidgetAt(0, m_ptzWidget->imagePresetsGroup());
+    m_settingsWidget->insertWidgetAt(2, m_trackingWidget->focusGroup());
     connect(m_ptzWidget, &PTZControlWidget::presetUpdated,
             this, &MainWindow::onPresetUpdated);
+    connect(m_trackingWidget, &TrackingControlWidget::invertControlsChanged,
+            this, [this](bool invertX, bool invertY) {
+        auto settings = m_controller->getConfig().getSettings();
+        settings.invertGimbalX = invertX;
+        settings.invertGimbalY = invertY;
+        m_controller->getConfig().setSettings(settings);
+        m_controller->saveConfig();
+    });
 
     m_tabWidget = new QTabWidget(scrollContent);
     m_tabWidget->setObjectName("controlTabs");
     m_tabWidget->setDocumentMode(true);
-    m_tabWidget->addTab(m_trackingWidget, tr("Tracking"));
-    m_tabWidget->addTab(m_ptzWidget, tr("Presets"));
-    m_tabWidget->addTab(m_settingsWidget, tr("Camera Image"));
+    auto addScrollableTab = [this](QWidget *content, const QString &label) {
+        auto *area = new QScrollArea(m_tabWidget);
+        area->setWidgetResizable(true);
+        area->setFrameShape(QFrame::NoFrame);
+        area->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+        area->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+        area->setWidget(content);
+        return m_tabWidget->addTab(area, label);
+    };
+    addScrollableTab(m_trackingWidget, tr("Console"));
+    addScrollableTab(m_settingsWidget, tr("Image"));
+    QWidget *morePage = new QWidget(m_tabWidget);
+    QVBoxLayout *morePageLayout = new QVBoxLayout(morePage);
+    morePageLayout->setContentsMargins(8, 8, 8, 14);
+    morePageLayout->addWidget(m_settingsWidget->moreGroup());
+    morePageLayout->addStretch();
+    addScrollableTab(morePage, tr("More"));
     m_effectsWidget = new VideoEffectsWidget(this);
     connect(m_effectsWidget, &VideoEffectsWidget::effectsChanged,
             this, &MainWindow::onVideoEffectsChanged);
-    // Mirror checkbox in tracking tab syncs with Creative FX horizontal flip
-    connect(m_trackingWidget, &TrackingControlWidget::mirrorToggled,
-            this, [this](bool mirrored) {
-                auto settings = m_effectsWidget->settings();
-                settings.horizontalFlip = mirrored;
-                m_effectsWidget->applySettings(settings);
-            });
-    m_tabWidget->addTab(m_effectsWidget, tr("Creative FX"));
-    scrollLayout->addWidget(m_tabWidget);
+    addScrollableTab(m_effectsWidget, tr("FX"));
+    scrollLayout->addWidget(m_tabWidget, 1);
     m_effectsWidget->reset();
 
     // Resize tab widget to fit the current tab (QTabWidget normally sizes to the tallest)
     connect(m_tabWidget, &QTabWidget::currentChanged, this, [this](int) {
+        m_pollTick = 3; // Refresh newly visible image controls on the next tick.
         fitTabToCurrentPage();
     });
     QTimer::singleShot(0, this, &MainWindow::fitTabToCurrentPage);
 
-    QGroupBox *virtualCameraGroup = new QGroupBox(tr("Virtual Camera"), scrollContent);
+    QWidget *virtualCameraPage = new QWidget(m_tabWidget);
+    QVBoxLayout *virtualCameraPageLayout = new QVBoxLayout(virtualCameraPage);
+    virtualCameraPageLayout->setContentsMargins(8, 8, 8, 14);
+    virtualCameraPageLayout->setSpacing(14);
+
+    QGroupBox *virtualCameraGroup = new QGroupBox(tr("Virtual Camera"), virtualCameraPage);
     QVBoxLayout *virtualLayout = new QVBoxLayout(virtualCameraGroup);
     virtualLayout->setContentsMargins(16, 16, 16, 16);
     virtualLayout->setSpacing(10);
@@ -493,9 +525,16 @@ void MainWindow::setupUI()
     virtualResolutionHint->setWordWrap(true);
     virtualResolutionHint->setStyleSheet("color: palette(mid); font-size: 11px;");
     virtualLayout->addWidget(virtualResolutionHint);
-    scrollLayout->addWidget(virtualCameraGroup);
+    virtualCameraPageLayout->addWidget(virtualCameraGroup);
+    virtualCameraPageLayout->addStretch();
+    addScrollableTab(virtualCameraPage, tr("Virtual Camera"));
 
-    QGroupBox *snapshotGroup = new QGroupBox(tr("Snapshots"), scrollContent);
+    QWidget *settingsPage = new QWidget(m_tabWidget);
+    QVBoxLayout *settingsPageLayout = new QVBoxLayout(settingsPage);
+    settingsPageLayout->setContentsMargins(8, 8, 8, 14);
+    settingsPageLayout->setSpacing(14);
+
+    QGroupBox *snapshotGroup = new QGroupBox(tr("Snapshots"), settingsPage);
     QVBoxLayout *snapshotLayout = new QVBoxLayout(snapshotGroup);
     snapshotLayout->setContentsMargins(16, 16, 16, 16);
     snapshotLayout->setSpacing(10);
@@ -519,26 +558,26 @@ void MainWindow::setupUI()
 
     QLabel *snapshotHint = new QLabel(tr("Use Copy to also place the image on the clipboard. Leave blank for the default path shown above."), snapshotGroup);
     snapshotHint->setWordWrap(true);
-    snapshotHint->setStyleSheet("color: palette(mid); font-size: 11px;");
+    snapshotHint->setForegroundRole(QPalette::PlaceholderText);
+    QFont snapshotHintFont = snapshotHint->font();
+    snapshotHintFont.setPointSizeF(
+        std::max(1.0, snapshotHintFont.pointSizeF() - 1.0));
+    snapshotHint->setFont(snapshotHintFont);
     snapshotLayout->addWidget(snapshotHint);
 
-    scrollLayout->addWidget(snapshotGroup);
+    settingsPageLayout->addWidget(snapshotGroup);
+    settingsPageLayout->addWidget(m_trackingWidget->gimbalControlGroup());
 
-    scrollLayout->addStretch();
-
-    m_startMinimizedCheckbox = new QCheckBox(tr("Launch minimized / Close to tray"), scrollContent);
+    m_startMinimizedCheckbox = new QCheckBox(
+        tr("Launch minimized / Close to tray"), settingsPage);
     m_startMinimizedCheckbox->setObjectName("footerCheckbox");
     connect(m_startMinimizedCheckbox, &QCheckBox::toggled,
             this, &MainWindow::onStartMinimizedToggled);
-    scrollLayout->addWidget(m_startMinimizedCheckbox);
+    settingsPageLayout->addWidget(m_startMinimizedCheckbox);
+    settingsPageLayout->addStretch();
+    addScrollableTab(settingsPage, tr("Settings"));
 
-    m_statusLabel = new QLabel(tr("Status: Initializing..."), scrollContent);
-    m_statusLabel->setObjectName("footerStatus");
-    m_statusLabel->setWordWrap(true);
-    scrollLayout->addWidget(m_statusLabel);
-
-    controlScroll->setWidget(scrollContent);
-    controlLayout->addWidget(controlScroll);
+    controlLayout->addWidget(scrollContent);
 
     m_splitter->addWidget(m_previewCard);
     m_splitter->addWidget(m_controlCard);
@@ -619,8 +658,8 @@ void MainWindow::applyModernStyle()
 
     const QColor accentBackground = withAlphaF(blendColors(highlight, cardBackground, 0.25), 0.48);
     const QColor accentBorder = withAlphaF(blendColors(highlight, cardBorder, 0.25), 0.75);
-    const QColor accentChipBackground = withAlphaF(blendColors(highlight, cardBackground, 0.15), 0.7);
     const QColor accentChipText = blendColors(highlightedText.isValid() ? highlightedText : brightText, text, 0.2);
+    const QColor connectedStatusColor = QColor(QStringLiteral("#22c55e"));
 
     const QColor warningColor = blendColors(highlight.lighter(140), text, 0.4);
 
@@ -650,9 +689,6 @@ void MainWindow::applyModernStyle()
     const QColor comboSelectionBackground = withAlphaF(highlight, 0.75);
     const QColor comboSelectionText = accentChipText;
 
-    const QColor groupBorder = withAlphaF(blendColors(cardBorder, mutedTone, 0.35), 0.55);
-    const QColor tabBackground = withAlphaF(blendColors(button, cardBackground, 0.2), 0.5);
-
     const QColor footerStatusColor = withAlphaF(text, 0.65);
     const QColor footerCheckboxColor = withAlphaF(text, 0.7);
     const QColor detachCheckedText = highlight;
@@ -676,12 +712,9 @@ void MainWindow::applyModernStyle()
             font-weight: 600;
         }
         QLabel#statusChip {
-            padding: 6px 12px;
-            border-radius: 14px;
+            border-radius: 6px;
             background-color: %7;
             color: %8;
-            font-weight: 600;
-            letter-spacing: 0.3px;
         }
         QFrame#statusBanner[state="connected"] QLabel#statusChip {
             background-color: %9;
@@ -701,39 +734,15 @@ void MainWindow::applyModernStyle()
             border-radius: 12px;
             padding: 28px;
         }
-        QGroupBox {
-            border: 1px solid %14;
-            border-radius: 14px;
-            margin-top: 14px;
-        }
-        QGroupBox::title {
-            subcontrol-origin: margin;
-            left: 18px;
-            top: -2px;
-            padding: 0 8px;
-            font-weight: 600;
-            background-color: %1;
-        }
         QTabWidget#controlTabs::pane {
             border: none;
-            margin-top: 18px;
-        }
-        QTabWidget#controlTabs::tab-bar {
-            alignment: center;
-        }
-        QTabBar::tab {
-            padding: 6px 10px;
-            margin: 0 2px;
-            font-size: 13px;
-        }
-        QTabBar::tab:selected {
-            font-weight: 600;
+            margin-top: 10px;
         }
         QLabel#footerStatus {
-            color: %15;
+            color: %14;
         }
         QCheckBox#footerCheckbox {
-            color: %16;
+            color: %15;
         }
     )")
         .arg(toCssColor(cardBackground))
@@ -744,12 +753,11 @@ void MainWindow::applyModernStyle()
         .arg(toCssColor(accentBorder))
         .arg(toCssColor(mutedChipBackground))
         .arg(toCssColor(mutedChipText))
-        .arg(toCssColor(accentChipBackground))
+        .arg(toCssColor(connectedStatusColor))
         .arg(toCssColor(accentChipText))
         .arg(toCssColor(warningColor))
         .arg(toCssColor(previewPlaceholderText))
         .arg(toCssColor(previewPlaceholderBorder))
-        .arg(toCssColor(groupBorder))
         .arg(toCssColor(footerStatusColor))
         .arg(toCssColor(footerCheckboxColor));
 
@@ -930,10 +938,12 @@ void MainWindow::updatePreviewControls()
 void MainWindow::updateStatusBanner(bool connected)
 {
     m_statusBanner->setProperty("state", connected ? "connected" : "disconnected");
-    m_statusChip->setText(connected ? tr("Camera • Online") : tr("Camera • Offline"));
     m_statusBanner->style()->unpolish(m_statusBanner);
     m_statusBanner->style()->polish(m_statusBanner);
+    m_statusChip->style()->unpolish(m_statusChip);
+    m_statusChip->style()->polish(m_statusChip);
     m_statusBanner->update();
+    m_statusChip->update();
 }
 
 void MainWindow::onTogglePreview(bool enabled)
@@ -1040,9 +1050,9 @@ void MainWindow::onCameraConnected(const CameraController::CameraInfo &info)
 {
     QString deviceText;
     if (info.version.isEmpty()) {
-        deviceText = QString("✓ Connected:\n%1").arg(info.name);
+        deviceText = info.name;
     } else {
-        deviceText = QString("✓ Connected:\n%1\n(v%2)")
+        deviceText = QString("%1 (v%2)")
             .arg(info.name)
             .arg(info.version);
     }
@@ -1056,7 +1066,19 @@ void MainWindow::onCameraConnected(const CameraController::CameraInfo &info)
     m_trackingWidget->setV4l2Mode(v4l2Mode);
     m_settingsWidget->setV4l2Mode(v4l2Mode);
 
-    QTimer::singleShot(100, this, [this]() {
+    // cameraConnected is emitted immediately before the controller publishes
+    // the camera's initial state. Capture the configured/user-intended values
+    // now, otherwise that initial state (Tiny 4K boots with Wide FOV) replaces
+    // the UI value before the delayed reapply runs.
+    CameraController::CameraState intendedState = getUIState();
+    const auto savedSettings = m_controller->getConfig().getSettings();
+    intendedState.zoom = savedSettings.zoom;
+    intendedState.pan = savedSettings.pan;
+    intendedState.tilt = savedSettings.tilt;
+    intendedState.autoFocusEnabled = savedSettings.focus < 0;
+    intendedState.manualFocusValue =
+        intendedState.autoFocusEnabled ? 0 : savedSettings.focus;
+    QTimer::singleShot(100, this, [this, intendedState]() {
         if (m_isCameraSwitch) {
             // Pull the new camera's actual state into the UI
             // without pushing the old camera's state back
@@ -1064,7 +1086,7 @@ void MainWindow::onCameraConnected(const CameraController::CameraInfo &info)
             onStateChanged(state);
             m_isCameraSwitch = false;
         } else {
-            m_controller->applyCurrentStateToCamera(getUIState());
+            m_controller->applyCurrentStateToCamera(intendedState);
         }
     });
 
@@ -1084,7 +1106,7 @@ void MainWindow::onCameraConnected(const CameraController::CameraInfo &info)
 void MainWindow::onCameraDisconnected()
 {
     m_isCameraSwitch = false;
-    m_deviceInfoLabel->setText("❌ Camera Disconnected");
+    m_deviceInfoLabel->setText(tr("Camera disconnected"));
     updateStatusBanner(false);
     m_statusLabel->setText("Status: Not connected");
     m_cameraWarningLabel->setVisible(false);
@@ -1103,6 +1125,13 @@ void MainWindow::onCameraDisconnected()
 
 void MainWindow::onStateChanged(const CameraController::CameraState &state)
 {
+    // Re-sync mode-dependent visibility: the connection can upgrade from
+    // the V4L2 fallback to a full SDK session after onCameraConnected ran,
+    // and a snapshot taken there would hide these controls forever.
+    bool v4l2Mode = m_controller->isV4l2Only();
+    m_trackingWidget->setV4l2Mode(v4l2Mode);
+    m_settingsWidget->setV4l2Mode(v4l2Mode);
+
     // Update all widgets with new state
     m_trackingWidget->updateFromState(state);
     m_settingsWidget->updateFromState(state);
@@ -1113,10 +1142,9 @@ void MainWindow::onStateChanged(const CameraController::CameraState &state)
 
 void MainWindow::fitTabToCurrentPage()
 {
-    QWidget *page = m_tabWidget->currentWidget();
-    if (!page) return;
-    m_tabWidget->setMaximumHeight(
-        page->sizeHint().height() + m_tabWidget->tabBar()->sizeHint().height());
+    m_tabWidget->setMaximumHeight(QWIDGETSIZE_MAX);
+    m_tabWidget->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Expanding);
+    m_tabWidget->updateGeometry();
 }
 
 void MainWindow::onCommandFailed(const QString &description, int errorCode)
@@ -1134,11 +1162,18 @@ void MainWindow::updateStatus()
         return;
     }
 
-    auto state = m_controller->getCurrentState();
+    const bool background = !isVisible() || isMinimized();
+    const int desiredInterval = background ? 3000 : 500;
+    if (m_statusTimer->interval() != desiredInterval)
+        m_statusTimer->setInterval(desiredInterval);
+
+    const bool imageTabVisible = !background && m_settingsWidget->isVisible();
+    const bool pollImageControls = imageTabVisible && (++m_pollTick % 4 == 0);
+    auto state = m_controller->pollCurrentState(pollImageControls);
 
     QStringList statusParts;
-    statusParts << QString("AI: %1").arg(state.aiMode == 0 ? "Off" : "On");
-    statusParts << QString("Zoom: %1%").arg(state.zoomRatio);
+    statusParts << QString("AI: %1").arg(state.autoFramingEnabled ? "On" : "Off");
+    statusParts << QString("Zoom: %1x").arg(state.zoom, 0, 'f', 2);
     statusParts << QString("HDR: %1").arg(state.hdrEnabled ? "On" : "Off");
     statusParts << QString("Face AE: %1").arg(state.faceAEEnabled ? "On" : "Off");
     statusParts << QString("Focus: %1").arg(state.autoFocusEnabled ? "Auto" : "Manual");
@@ -1175,26 +1210,31 @@ void MainWindow::updateVirtualCameraAvailability(const QString &devicePath)
     const QString modprobeCommand = modprobeCommandForDevice(devicePath);
 
     QString statusText;
-    QString statusColor;
+    const bool darkTheme = palette().color(QPalette::Window).lightness() < 128;
+    QColor statusColor;
 
     if (deviceExists) {
         statusText = tr("Virtual camera available (%1)").arg(devicePath);
-        statusColor = QStringLiteral("#2e7d32");
+        statusColor = darkTheme ? QColor(QStringLiteral("#81c784"))
+                                : QColor(QStringLiteral("#2e7d32"));
         m_virtualCameraAvailable = true;
     } else if (moduleLoaded) {
         statusText = tr("v4l2loopback is loaded, but %1 does not exist.\nRun: %2")
                          .arg(devicePath, modprobeCommand);
-        statusColor = QStringLiteral("#b26a00");
+        statusColor = darkTheme ? QColor(QStringLiteral("#ffb74d"))
+                                : QColor(QStringLiteral("#b26a00"));
         m_virtualCameraAvailable = false;
     } else {
         statusText = tr("Virtual camera support is disabled.\nInstall the module and load it with:\n%1")
                          .arg(modprobeCommand);
-        statusColor = QStringLiteral("#b71c1c");
+        statusColor = darkTheme ? QColor(QStringLiteral("#ef9a9a"))
+                                : QColor(QStringLiteral("#b71c1c"));
         m_virtualCameraAvailable = false;
     }
 
     m_virtualCameraStatusLabel->setText(statusText);
-    m_virtualCameraStatusLabel->setStyleSheet(QStringLiteral("color: %1;").arg(statusColor));
+    m_virtualCameraStatusLabel->setStyleSheet(
+        QStringLiteral("color: %1;").arg(statusColor.name()));
     if (m_virtualCameraCheckbox) {
         m_virtualCameraCheckbox->setToolTip(statusText);
     }
@@ -1242,11 +1282,14 @@ void MainWindow::loadConfiguration()
     m_trackingWidget->setHumanSubMode(settings.aiSubMode);
     m_trackingWidget->setAutoZoomEnabled(settings.autoZoom);
     m_trackingWidget->setTrackSpeed(settings.trackSpeed);
+    m_trackingWidget->setTrackingStyle(settings.trackingStyle);
     m_trackingWidget->setAudioAutoGain(settings.audioAutoGain);
+    m_trackingWidget->setInvertControls(
+        settings.invertGimbalX, settings.invertGimbalY);
     m_settingsWidget->setHDREnabled(settings.hdr);
     m_settingsWidget->setFOVMode(settings.fov);
     m_settingsWidget->setFaceAEEnabled(settings.faceAE);
-    m_settingsWidget->setFaceFocusEnabled(settings.faceFocus);
+    m_trackingWidget->setFaceFocusEnabled(settings.faceFocus);
 
     // Image controls
     m_settingsWidget->setBrightnessAuto(settings.brightnessAuto);
@@ -1255,6 +1298,9 @@ void MainWindow::loadConfiguration()
     m_settingsWidget->setContrast(settings.contrast);
     m_settingsWidget->setSaturationAuto(settings.saturationAuto);
     m_settingsWidget->setSaturation(settings.saturation);
+    m_settingsWidget->setHue(settings.hue);
+    m_settingsWidget->setSharpness(settings.sharpness);
+    m_settingsWidget->setAntiFlicker(settings.antiFlicker);
     m_settingsWidget->setWhiteBalance(settings.whiteBalance);
     m_previewWidget->setPreferredFormatId(QString::fromStdString(settings.previewFormat));
 
@@ -1263,6 +1309,7 @@ void MainWindow::loadConfiguration()
         const auto &preset = settings.presets[static_cast<size_t>(i)];
         presetStates[static_cast<size_t>(i)] = {
             preset.defined,
+            QString::fromStdString(preset.name),
             preset.pan,
             preset.tilt,
             preset.zoom
@@ -1379,11 +1426,12 @@ CameraController::CameraState MainWindow::getUIState() const
     state.aiSubMode = m_trackingWidget->currentHumanSubMode();
     state.autoZoomEnabled = m_trackingWidget->isAutoZoomEnabled();
     state.trackSpeedMode = m_trackingWidget->currentTrackSpeed();
+    state.trackingStyle = m_trackingWidget->currentTrackingStyle();
     state.audioAutoGainEnabled = m_trackingWidget->isAudioAutoGainEnabled();
     state.hdrEnabled = m_settingsWidget->isHDREnabled();
     state.fovMode = m_settingsWidget->getFOVMode();
     state.faceAEEnabled = m_settingsWidget->isFaceAEEnabled();
-    state.faceFocusEnabled = m_settingsWidget->isFaceFocusEnabled();
+    state.faceFocusEnabled = m_trackingWidget->isFaceFocusEnabled();
 
     // Image controls
     state.brightnessAuto = m_settingsWidget->isBrightnessAuto();
@@ -1392,6 +1440,9 @@ CameraController::CameraState MainWindow::getUIState() const
     state.contrast = m_settingsWidget->getContrast();
     state.saturationAuto = m_settingsWidget->isSaturationAuto();
     state.saturation = m_settingsWidget->getSaturation();
+    state.hue = m_settingsWidget->getHue();
+    state.sharpness = m_settingsWidget->getSharpness();
+    state.antiFlicker = m_settingsWidget->getAntiFlicker();
     state.whiteBalance = m_settingsWidget->getWhiteBalance();
     state.whiteBalanceKelvin = m_settingsWidget->getWhiteBalanceKelvin();
 
@@ -1523,7 +1574,8 @@ void MainWindow::onPreviewFormatChanged(const QString &formatId)
     updateVirtualCameraStreamerState();
 }
 
-void MainWindow::onPresetUpdated(int index, double pan, double tilt, double zoom, bool defined)
+void MainWindow::onPresetUpdated(int index, double pan, double tilt, double zoom,
+                                 bool defined, const QString &name)
 {
     auto settings = m_controller->getConfig().getSettings();
     if (index < 0 || index >= static_cast<int>(settings.presets.size())) {
@@ -1532,6 +1584,7 @@ void MainWindow::onPresetUpdated(int index, double pan, double tilt, double zoom
 
     auto &preset = settings.presets[static_cast<size_t>(index)];
     preset.defined = defined;
+    preset.name = name.toStdString();
     preset.pan = pan;
     preset.tilt = tilt;
     preset.zoom = zoom;
@@ -1910,7 +1963,6 @@ void MainWindow::onVideoEffectsChanged(const FilterPreviewWidget::VideoEffectsSe
         return;
     }
     m_previewWidget->setVideoEffects(settings);
-    m_trackingWidget->setMirrored(settings.horizontalFlip);
 }
 
 void MainWindow::onSnapshotCaptured(const QImage &image)

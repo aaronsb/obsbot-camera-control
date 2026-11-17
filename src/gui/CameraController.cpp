@@ -25,18 +25,19 @@ CameraController::CameraController(QObject *parent)
     resetControlRanges();
 }
 
-// The SDK calls the device-changed callback from its own detection thread, and
-// Devices::close() can still deliver an event that was already pending. Swap in
-// a no-op so no late event reaches a controller that has moved to V4L2 or been
-// destroyed.
-static void detachSdkCallback()
-{
-    Devices::get().setDevChangedCallback([](std::string, bool, void *) {}, nullptr);
-}
-
 CameraController::~CameraController()
 {
-    detachSdkCallback();
+    // close() joins the SDK's detection threads, so no device-changed callback
+    // can run once the controller is gone. Release the device first.
+    m_device.reset();
+    closeSdk();
+}
+
+void CameraController::closeSdk()
+{
+    if (m_sdkClosed) return;
+    Devices::get().close();
+    m_sdkClosed = true;
 }
 
 void CameraController::connectToCamera()
@@ -48,10 +49,19 @@ void CameraController::connectToCamera(const QString &devicePath)
 {
     m_selectedDevicePath = devicePath;
 
+    // Once the V4L2 fallback has closed the SDK it never reports a device again
+    // in this process, so waiting for it would only delay the reconnect.
+    if (m_sdkClosed) {
+        tryV4l2Fallback();
+        return;
+    }
+
     auto onDevChanged = [this](std::string /*dev_sn*/, bool connected, void * /*param*/) {
         if (connected) {
             // SDK detection runs on its own thread. Marshal the connect onto the
             // Qt/main thread so we never touch m_device or emit signals off-thread.
+            // Devices::close() can still deliver a pending event after the V4L2
+            // fallback has taken the camera; the m_connected check drops it.
             QMetaObject::invokeMethod(this, [this]() {
                 if (m_connected) return;
                 auto dev = pickSdkDevice(Devices::get().getDevList());
@@ -165,10 +175,14 @@ void CameraController::tryV4l2Fallback()
                 return;
             }
             auto path = V4l2Backend::findObsbotDevice();
-            if (!path.empty()) {
-                m_v4l2ScanTimer->stop();
+            if (path.empty()) return;
+            m_v4l2ScanTimer->stop();
+            // A camera plugged in now shows its video node seconds before the
+            // SDK reports it. Give the SDK the same grace period as at startup.
+            if (m_sdkClosed)
                 connectV4l2(path);
-            }
+            else
+                startSdkGraceThenFallback();
         });
     }
     m_v4l2ScanTimer->start(3000);
@@ -179,10 +193,9 @@ void CameraController::connectV4l2(const std::string &devicePath)
     if (!m_v4l2.open(devicePath))
         return;
 
-    // V4L2 owns the camera from here on. Stopping the SDK is permanent for
-    // this process, so the SDK never takes the camera back mid-session.
-    detachSdkCallback();
-    Devices::get().close();
+    // V4L2 owns the camera from here on. Closing the SDK is permanent for this
+    // process, so the SDK never takes the camera back mid-session.
+    closeSdk();
 
     m_connected = true;
     m_v4l2Only = true;
@@ -261,6 +274,7 @@ void CameraController::updateV4l2State()
 void CameraController::disconnectFromCamera()
 {
     if (m_sdkGraceTimer) m_sdkGraceTimer->stop();
+    if (m_v4l2ScanTimer) m_v4l2ScanTimer->stop();
     m_sdkGraceElapsedMs = 0;
 
     if (m_connected) {

@@ -156,6 +156,7 @@ private:
     V4l2Backend m_v4l2;
     QTimer *m_v4l2ScanTimer = nullptr;
     QTimer *m_sdkGraceTimer = nullptr;  // Waits for async SDK detection before V4L2 fallback
+    bool m_sdkClosed = false;           // Devices::close() has run; the SDK is gone for this process
     int m_sdkGraceElapsedMs = 0;
     QString m_v4l2DevicePath;
     CameraInfo m_cameraInfo;
@@ -175,6 +176,7 @@ private:
     std::shared_ptr<Device> pickSdkDevice(const std::list<std::shared_ptr<Device>> &list) const;
     void connectSdkDevice(const std::shared_ptr<Device> &dev);
     void startSdkGraceThenFallback();
+    void closeSdk();
     void tryV4l2Fallback();
     void connectV4l2(const std::string &devicePath);
     void refreshV4l2ControlRanges();

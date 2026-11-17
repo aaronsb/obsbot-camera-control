@@ -27,6 +27,17 @@ CameraController::CameraController(QObject *parent)
 
 CameraController::~CameraController()
 {
+    // close() joins the SDK's detection threads, so no device-changed callback
+    // can run once the controller is gone. Release the device first.
+    m_device.reset();
+    closeSdk();
+}
+
+void CameraController::closeSdk()
+{
+    if (m_sdkClosed) return;
+    Devices::get().close();
+    m_sdkClosed = true;
 }
 
 void CameraController::connectToCamera()
@@ -38,66 +49,114 @@ void CameraController::connectToCamera(const QString &devicePath)
 {
     m_selectedDevicePath = devicePath;
 
-    auto pickDevice = [this](const std::list<std::shared_ptr<Device>> &list)
-        -> std::shared_ptr<Device>
-    {
-        if (list.empty()) return nullptr;
-        if (m_selectedDevicePath.isEmpty()) return list.front();
+    // Once the V4L2 fallback has closed the SDK it never reports a device again
+    // in this process, so waiting for it would only delay the reconnect.
+    if (m_sdkClosed) {
+        if (!m_connected)
+            tryV4l2Fallback();
+        return;
+    }
 
-        for (const auto &dev : list) {
-            if (QString::fromStdString(dev->videoDevPath()) == m_selectedDevicePath)
-                return dev;
-        }
-        qDebug() << "CameraController: device" << m_selectedDevicePath
-                 << "not found in SDK list, using first available";
-        return list.front();
-    };
-
-    auto onDevChanged = [this, pickDevice](std::string /*dev_sn*/, bool connected, void * /*param*/) {
+    auto onDevChanged = [this](std::string /*dev_sn*/, bool connected, void * /*param*/) {
         if (connected) {
-            auto dev_list = Devices::get().getDevList();
-            auto dev = pickDevice(dev_list);
-            if (dev) {
-                m_device = dev;
-                m_connected = true;
-                m_cameraInfo.name = QString::fromStdString(m_device->devName());
-                m_cameraInfo.serialNumber = QString::fromStdString(m_device->devSn());
-                m_cameraInfo.version = QString::fromStdString(m_device->devVersion());
-                m_cameraInfo.productType = m_device->productType();
-                m_cameraInfo.connected = true;
-                refreshControlRanges();
-                emit cameraConnected(m_cameraInfo);
-                updateState();
-            }
+            // SDK detection runs on its own thread. Marshal the connect onto the
+            // Qt/main thread so we never touch m_device or emit signals off-thread.
+            // Devices::close() can still deliver a pending event after the V4L2
+            // fallback has taken the camera; the m_connected check drops it.
+            QMetaObject::invokeMethod(this, [this]() {
+                if (m_connected) return;
+                auto dev = pickSdkDevice(Devices::get().getDevList());
+                if (dev) connectSdkDevice(dev);
+            }, Qt::QueuedConnection);
         } else {
-            m_connected = false;
-            m_cameraInfo.connected = false;
-            resetControlRanges();
-            emit cameraDisconnected();
+            QMetaObject::invokeMethod(this, [this]() {
+                if (m_v4l2Only) return;  // V4L2 path manages its own lifecycle
+                m_connected = false;
+                m_cameraInfo.connected = false;
+                resetControlRanges();
+                emit cameraDisconnected();
+            }, Qt::QueuedConnection);
         }
     };
 
     Devices::get().setDevChangedCallback(onDevChanged, nullptr);
     Devices::get().setEnableMdnsScan(false);
 
-    auto dev_list = Devices::get().getDevList();
-    if (!dev_list.empty() && !m_connected) {
-        auto dev = pickDevice(dev_list);
-        if (dev) {
-            m_device = dev;
-            m_connected = true;
-            m_cameraInfo.name = QString::fromStdString(m_device->devName());
-            m_cameraInfo.serialNumber = QString::fromStdString(m_device->devSn());
-            m_cameraInfo.version = QString::fromStdString(m_device->devVersion());
-            m_cameraInfo.productType = m_device->productType();
-            m_cameraInfo.connected = true;
-            refreshControlRanges();
-            emit cameraConnected(m_cameraInfo);
-            updateState();
-        }
+    auto dev = pickSdkDevice(Devices::get().getDevList());
+    if (dev && !m_connected) {
+        connectSdkDevice(dev);
     } else {
-        tryV4l2Fallback();
+        // SDK USB detection is asynchronous and can take several seconds on some
+        // devices (Tiny SE ~3.4s). Give it a grace period to report the device
+        // before falling back to V4L2-only mode: the V4L2 fallback calls
+        // Devices::close(), which permanently stops SDK detection for the whole
+        // process and hides every SDK-only feature (AI tracking, HDR, etc.).
+        startSdkGraceThenFallback();
     }
+}
+
+std::shared_ptr<Device> CameraController::pickSdkDevice(const std::list<std::shared_ptr<Device>> &list) const
+{
+    if (list.empty()) return nullptr;
+    if (m_selectedDevicePath.isEmpty()) return list.front();
+
+    for (const auto &dev : list) {
+        if (QString::fromStdString(dev->videoDevPath()) == m_selectedDevicePath)
+            return dev;
+    }
+    qDebug() << "CameraController: device" << m_selectedDevicePath
+             << "not found in SDK list, using first available";
+    return list.front();
+}
+
+void CameraController::connectSdkDevice(const std::shared_ptr<Device> &dev)
+{
+    if (m_sdkGraceTimer) m_sdkGraceTimer->stop();
+    m_sdkGraceElapsedMs = 0;
+
+    m_device = dev;
+    m_v4l2Only = false;
+    m_connected = true;
+    m_cameraInfo.name = QString::fromStdString(m_device->devName());
+    m_cameraInfo.serialNumber = QString::fromStdString(m_device->devSn());
+    m_cameraInfo.version = QString::fromStdString(m_device->devVersion());
+    m_cameraInfo.productType = m_device->productType();
+    m_cameraInfo.connected = true;
+    refreshControlRanges();
+    emit cameraConnected(m_cameraInfo);
+    updateState();
+}
+
+void CameraController::startSdkGraceThenFallback()
+{
+    static constexpr int kGraceTotalMs = 8000;  // > observed SDK detection latency
+    static constexpr int kGraceStepMs = 250;
+
+    if (!m_sdkGraceTimer) {
+        m_sdkGraceTimer = new QTimer(this);
+        m_sdkGraceTimer->setInterval(kGraceStepMs);
+        connect(m_sdkGraceTimer, &QTimer::timeout, this, [this]() {
+            if (m_connected) {  // SDK callback already connected us
+                m_sdkGraceTimer->stop();
+                m_sdkGraceElapsedMs = 0;
+                return;
+            }
+            if (auto dev = pickSdkDevice(Devices::get().getDevList())) {
+                m_sdkGraceTimer->stop();
+                connectSdkDevice(dev);
+                return;
+            }
+            m_sdkGraceElapsedMs += kGraceStepMs;
+            if (m_sdkGraceElapsedMs >= kGraceTotalMs) {
+                m_sdkGraceTimer->stop();
+                m_sdkGraceElapsedMs = 0;
+                if (!m_connected)
+                    tryV4l2Fallback();  // no SDK device appeared; use V4L2
+            }
+        });
+    }
+    m_sdkGraceElapsedMs = 0;
+    m_sdkGraceTimer->start();
 }
 
 void CameraController::tryV4l2Fallback()
@@ -112,13 +171,19 @@ void CameraController::tryV4l2Fallback()
         m_v4l2ScanTimer = new QTimer(this);
         m_v4l2ScanTimer->setSingleShot(false);
         connect(m_v4l2ScanTimer, &QTimer::timeout, this, [this]() {
-            if (m_connected)
-                return;
-            auto path = V4l2Backend::findObsbotDevice();
-            if (!path.empty()) {
+            if (m_connected) {
                 m_v4l2ScanTimer->stop();
-                connectV4l2(path);
+                return;
             }
+            auto path = V4l2Backend::findObsbotDevice();
+            if (path.empty()) return;
+            m_v4l2ScanTimer->stop();
+            // A camera plugged in now shows its video node seconds before the
+            // SDK reports it. Give the SDK the same grace period as at startup.
+            if (m_sdkClosed)
+                connectV4l2(path);
+            else
+                startSdkGraceThenFallback();
         });
     }
     m_v4l2ScanTimer->start(3000);
@@ -129,7 +194,9 @@ void CameraController::connectV4l2(const std::string &devicePath)
     if (!m_v4l2.open(devicePath))
         return;
 
-    Devices::get().close();
+    // V4L2 owns the camera from here on. Closing the SDK is permanent for this
+    // process, so the SDK never takes the camera back mid-session.
+    closeSdk();
 
     m_connected = true;
     m_v4l2Only = true;
@@ -207,6 +274,10 @@ void CameraController::updateV4l2State()
 
 void CameraController::disconnectFromCamera()
 {
+    if (m_sdkGraceTimer) m_sdkGraceTimer->stop();
+    if (m_v4l2ScanTimer) m_v4l2ScanTimer->stop();
+    m_sdkGraceElapsedMs = 0;
+
     if (m_connected) {
         if (m_v4l2Only) {
             m_v4l2.close();

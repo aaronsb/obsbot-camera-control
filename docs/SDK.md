@@ -9,7 +9,9 @@ The OBSBOT SDK (`sdk/`) is a closed-source library distributed as precompiled bi
 - One sample application: `sample_main.cpp`
 - No license file, no copyright headers, no attribution notices
 
-The library version reported in `comm.hpp` is 1.3.0. OBSBOT's download labeled "v2.1.0" contains byte-identical files (verified by SHA256).
+The vendored SDK is OBSBOT's `libdev_v2.1.0_8.zip`, Linux x86_64 build `libdev.so.1.0.0` (June 2026). That zip also ships an older `libdev.so.1.0.3` (January 2026) that does not know the Meet Flip; only `libdev.so.1.0.0` is vendored. The previous SDK, v1.0.2, stays in `sdk/v1.0.2`.
+
+The shipped `dev.hpp` leaves Linux out of the `videoDevPath()`/`audioDevPath()` platform guard although the library exports both. `sdk/v2.1.0_8/include/dev/dev.hpp` carries a Linux branch for them.
 
 ## Internal Source Structure
 

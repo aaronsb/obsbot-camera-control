@@ -110,6 +110,7 @@ private:
     QOpenGLBuffer m_vertexBuffer;
     QOpenGLVertexArrayObject m_vertexArray;
     bool m_geometryInitialized;
+    bool m_glResourcesCleaned = true;
 
 private slots:
     void handleContextAboutToBeDestroyed();

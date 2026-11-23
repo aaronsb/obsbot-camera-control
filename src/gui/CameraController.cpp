@@ -995,6 +995,25 @@ void CameraController::saveCurrentStateToConfig()
     m_config.setSettings(settings);
 }
 
+bool CameraController::hasGimbal() const
+{
+    switch (m_cameraInfo.productType) {
+    case ObsbotProdTiny:
+    case ObsbotProdTiny4k:
+    case ObsbotProdTiny2:
+    case ObsbotProdTiny2Lite:
+    case ObsbotProdTinySE:
+    case ObsbotProdTiny3:
+    case ObsbotProdTiny3Lite:
+    case ObsbotProdTailAir:
+    case ObsbotProdTail2:
+    case ObsbotProdTail2S:
+        return true;
+    default:
+        return false;  // Meet family, unknown models, V4L2-only
+    }
+}
+
 bool CameraController::isTiny2Family() const
 {
     return m_cameraInfo.productType == ObsbotProdTiny2 ||

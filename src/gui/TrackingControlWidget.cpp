@@ -105,7 +105,7 @@ TrackingControlWidget::TrackingControlWidget(CameraController *controller, QWidg
 
     layout->addWidget(m_trackingGroupBox);
 
-    // Manual PTZ Controls (disabled when auto-framing is enabled)
+    // Manual PTZ controls; updatePTZControlsState() decides which are usable
     m_ptzContainer = new QWidget(this);
     QVBoxLayout *ptzContainerLayout = new QVBoxLayout(m_ptzContainer);
     ptzContainerLayout->setContentsMargins(0, 0, 0, 0);
@@ -342,17 +342,6 @@ void TrackingControlWidget::updateFromState(const CameraController::CameraState 
         }
     }
 
-    // Sync zoom slider from camera state (only when user isn't dragging)
-    if (!m_zoomSlider->isSliderDown() && !commandInFlight && !isSettling) {
-        int zoomSliderVal = static_cast<int>(state.zoom * 10.0 + 0.5);
-        if (m_zoomSlider->value() != zoomSliderVal) {
-            m_zoomSlider->blockSignals(true);
-            m_zoomSlider->setValue(zoomSliderVal);
-            m_zoomSlider->blockSignals(false);
-            m_zoomLabel->setText(QString("%1x").arg(zoomSliderVal / 10.0, 0, 'f', 1));
-        }
-    }
-
     // Sync auto focus checkbox; the slider only applies in manual focus.
     // Wait out the hold after a user change so a late status read can't undo
     // it. The controller echoes the requested mode at once, so a matching
@@ -375,8 +364,11 @@ void TrackingControlWidget::updateFromState(const CameraController::CameraState 
         }
     }
 
-    // Sync zoom slider from camera state (only when user isn't dragging)
-    if (!m_zoomSlider->isSliderDown() && !commandInFlight && !isSettling) {
+    // Sync zoom slider from camera state (only when user isn't dragging).
+    // state.zoom stays 0 until the camera reports a zoom the controller
+    // understands (the Meet 2 reports zoom_ratio on another scale), so skip
+    // the sync rather than show 0.00x.
+    if (state.zoom >= 1.0 && !m_zoomSlider->isSliderDown() && !commandInFlight && !isSettling) {
         int zoomSliderVal = qRound(state.zoom * 100.0);
         if (m_zoomSlider->value() != zoomSliderVal) {
             m_zoomSlider->blockSignals(true);
@@ -452,6 +444,7 @@ void TrackingControlWidget::onAutoZoomToggled(bool checked)
     if (!m_tiny2Capabilities) return;
     m_userInitiated = true;
     m_controller->setAutoZoom(checked);
+    updatePTZControlsState();  // AI Auto Zoom takes the zoom slider over
     m_commandTimer->start(1000);
 }
 
@@ -484,9 +477,22 @@ void TrackingControlWidget::updateTiny2Visibility()
 
 void TrackingControlWidget::updatePTZControlsState()
 {
-    // Disable PTZ controls when auto-framing is enabled
-    bool enabled = !m_trackingCheckBox->isChecked();
-    m_ptzContainer->setEnabled(enabled);
+    const bool tracking = m_trackingCheckBox->isChecked();
+
+    // Manual pan/tilt fights the tracker, so the pad is off while tracking.
+    m_xyPad->setEnabled(!tracking);
+    m_positionLabel->setEnabled(!tracking);
+
+    // Zoom stays usable while a gimbal camera tracks: the gimbal follows the
+    // subject and zoom is independent, unless the camera's AI Auto Zoom is
+    // driving zoom itself. Cameras without a gimbal (Meet family) frame by
+    // digital zoom and crop, so a manual zoom would fight the framing.
+    const bool zoomUsable = !tracking
+        || (m_controller->hasGimbal() && !m_autoZoomCheckBox->isChecked());
+    m_zoomSlider->setEnabled(zoomUsable);
+    m_zoomLabel->setEnabled(zoomUsable);
+
+    // Focus follows its own Auto checkbox, independent of tracking.
 }
 
 void TrackingControlWidget::flushPendingCommands()

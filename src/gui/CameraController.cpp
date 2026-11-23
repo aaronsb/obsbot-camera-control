@@ -880,7 +880,8 @@ void CameraController::applyConfigToCamera()
     if (settings.focus >= 0) {
         setFocusAbsolute(settings.focus, false);
     } else {
-        setFocusAbsolute(0, true);
+        // Keep the manual position for when the user goes back to manual
+        setFocusAbsolute(m_currentState.manualFocusValue, true);
     }
 
     if (isTiny2Family()) {

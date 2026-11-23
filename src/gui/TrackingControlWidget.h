@@ -10,6 +10,7 @@
 #include <QVBoxLayout>
 #include <QGroupBox>
 #include <QTimer>
+#include <QDeadlineTimer>
 #include <QSignalBlocker>
 #include "CameraController.h"
 #include "XYPad.h"
@@ -61,6 +62,7 @@ private slots:
     void onXYPadChanged(float x, float y);
     void onZoomChanged(int value);
     void onFocusChanged(int value);
+    void onAutoFocusToggled(bool checked);
 
 private:
     CameraController *m_controller;
@@ -82,6 +84,12 @@ private:
     QSlider *m_zoomSlider;
     QLabel *m_zoomLabel;
     QSlider *m_focusSlider;
+    QCheckBox *m_autoFocusCheckBox;
+    // After the user changes the focus mode, status reads leave the Auto
+    // checkbox alone until this runs out. The Meet 2 reports a focus mode
+    // change 2-3 s late, so an earlier read would flip the checkbox back.
+    // Starts expired.
+    QDeadlineTimer m_autoFocusHold{0};
     QLabel *m_focusLabel;
     QLabel *m_positionLabel;
     QWidget *m_ptzContainer;

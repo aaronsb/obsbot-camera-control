@@ -350,8 +350,9 @@ bool CameraController::enableAutoFraming(bool enabled)
             });
         });
 
-        // Restore auto focus when auto-framing is enabled
-        setFocusAbsolute(0, true);
+        // Restore auto focus when auto-framing is enabled; keep the manual
+        // position for when the user goes back to manual focus
+        setFocusAbsolute(m_currentState.manualFocusValue, true);
 
         m_currentState.autoFramingEnabled = true;
         emit stateChanged(m_currentState);
@@ -572,6 +573,12 @@ bool CameraController::setFocusAbsolute(int position, bool autoFocus)
     if (success) {
         m_currentState.autoFocusEnabled = autoFocus;
         m_currentState.manualFocusValue = position;
+        // Keep the in-memory config current: a reconnect (minimize/restore,
+        // replug) restores focus from it. Written to disk on the next save,
+        // with the same value saveCurrentStateToConfig() would write.
+        auto settings = m_config.getSettings();
+        settings.focus = autoFocus ? -1 : position;
+        m_config.setSettings(settings);
         emit stateChanged(m_currentState);
     }
     return success;
@@ -911,20 +918,23 @@ void CameraController::applyCurrentStateToCamera(const CameraState &uiState)
     // Cache the intended state
     m_cachedState = uiState;
 
-    // Begin settling period - block status updates for 2 seconds
-    beginSettling(2000);
+    // Begin settling period - block status updates while the camera catches
+    // up. The Meet 2 reports some changes (focus mode) 2-3 s late.
+    beginSettling(3500);
 
     // Apply the current UI state to camera (respects user changes)
-    enableAutoFraming(uiState.autoFramingEnabled);
+    const bool framingOn = enableAutoFraming(uiState.autoFramingEnabled)
+                           && uiState.autoFramingEnabled;
 
-    // Focus is not part of the UI state, so restore it from config.
-    // Auto-framing already switched to auto focus when it is on.
-    if (!uiState.autoFramingEnabled) {
+    // Focus is not part of the UI state, so restore it from config. Turning
+    // auto-framing on already switched to auto focus; in V4L2 mode or when
+    // that failed, nothing did.
+    if (!framingOn) {
         int focus = m_config.getSettings().focus;
         if (focus >= 0) {
             setFocusAbsolute(focus, false);
         } else {
-            setFocusAbsolute(0, true);
+            setFocusAbsolute(m_currentState.manualFocusValue, true);
         }
     }
     if (isTiny2Family()) {

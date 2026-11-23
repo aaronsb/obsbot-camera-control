@@ -354,13 +354,10 @@ void TrackingControlWidget::updateFromState(const CameraController::CameraState 
     }
 
     // Sync auto focus checkbox; the slider only applies in manual focus.
-    // After a click, keep the user's choice until the camera reports it (or
-    // the hold runs out), so a late status read can't undo the click.
-    if (m_pendingAutoFocus
-        && (state.autoFocusEnabled == *m_pendingAutoFocus || m_pendingAutoFocusDeadline.hasExpired())) {
-        m_pendingAutoFocus.reset();
-    }
-    if (!m_pendingAutoFocus && !commandInFlight && !isSettling
+    // Wait out the hold after a user change so a late status read can't undo
+    // it. The controller echoes the requested mode at once, so a matching
+    // state doesn't prove the camera has caught up; only the hold's end does.
+    if (m_autoFocusHold.hasExpired() && !commandInFlight && !isSettling
         && m_autoFocusCheckBox->isChecked() != state.autoFocusEnabled) {
         m_autoFocusCheckBox->blockSignals(true);
         m_autoFocusCheckBox->setChecked(state.autoFocusEnabled);
@@ -505,6 +502,7 @@ void TrackingControlWidget::flushPendingCommands()
     if (m_dirtyFocus) {
         m_controller->setFocusAbsolute(m_pendingFocus, false);
         m_dirtyFocus = false;
+        m_autoFocusHold.setRemainingTime(5000);
     }
 }
 
@@ -559,8 +557,7 @@ void TrackingControlWidget::onAutoFocusToggled(bool checked)
     m_userInitiated = true;
     // Pass the slider position either way so it is kept for manual mode
     m_controller->setFocusAbsolute(m_focusSlider->value(), checked);
-    m_pendingAutoFocus = checked;
-    m_pendingAutoFocusDeadline.setRemainingTime(5000);
+    m_autoFocusHold.setRemainingTime(5000);
     m_commandTimer->start(1000);
 }
 

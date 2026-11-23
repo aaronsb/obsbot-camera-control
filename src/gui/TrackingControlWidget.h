@@ -14,7 +14,6 @@
 #include <QSignalBlocker>
 #include "CameraController.h"
 #include "XYPad.h"
-#include <optional>
 
 /**
  * @brief Widget for camera tracking control (automatic or manual PTZ)
@@ -86,11 +85,11 @@ private:
     QLabel *m_zoomLabel;
     QSlider *m_focusSlider;
     QCheckBox *m_autoFocusCheckBox;
-    // The focus mode the user just picked, held until the camera reports it.
-    // The Meet 2 reports a focus mode change 2-3 s late, so a status read in
-    // between would otherwise flip the checkbox back.
-    std::optional<bool> m_pendingAutoFocus;
-    QDeadlineTimer m_pendingAutoFocusDeadline;
+    // After the user changes the focus mode, status reads leave the Auto
+    // checkbox alone until this runs out. The Meet 2 reports a focus mode
+    // change 2-3 s late, so an earlier read would flip the checkbox back.
+    // Starts expired.
+    QDeadlineTimer m_autoFocusHold{0};
     QLabel *m_focusLabel;
     QLabel *m_positionLabel;
     QWidget *m_ptzContainer;

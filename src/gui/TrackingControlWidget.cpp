@@ -353,8 +353,15 @@ void TrackingControlWidget::updateFromState(const CameraController::CameraState 
         }
     }
 
-    // Sync auto focus checkbox; the slider only applies in manual focus
-    if (!commandInFlight && !isSettling && m_autoFocusCheckBox->isChecked() != state.autoFocusEnabled) {
+    // Sync auto focus checkbox; the slider only applies in manual focus.
+    // After a click, keep the user's choice until the camera reports it (or
+    // the hold runs out), so a late status read can't undo the click.
+    if (m_pendingAutoFocus
+        && (state.autoFocusEnabled == *m_pendingAutoFocus || m_pendingAutoFocusDeadline.hasExpired())) {
+        m_pendingAutoFocus.reset();
+    }
+    if (!m_pendingAutoFocus && !commandInFlight && !isSettling
+        && m_autoFocusCheckBox->isChecked() != state.autoFocusEnabled) {
         m_autoFocusCheckBox->blockSignals(true);
         m_autoFocusCheckBox->setChecked(state.autoFocusEnabled);
         m_autoFocusCheckBox->blockSignals(false);
@@ -552,6 +559,8 @@ void TrackingControlWidget::onAutoFocusToggled(bool checked)
     m_userInitiated = true;
     // Pass the slider position either way so it is kept for manual mode
     m_controller->setFocusAbsolute(m_focusSlider->value(), checked);
+    m_pendingAutoFocus = checked;
+    m_pendingAutoFocusDeadline.setRemainingTime(5000);
     m_commandTimer->start(1000);
 }
 

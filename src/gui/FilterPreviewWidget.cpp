@@ -183,6 +183,14 @@ FilterPreviewWidget::FilterPreviewWidget(QWidget *parent)
 
 FilterPreviewWidget::~FilterPreviewWidget()
 {
+    // QOpenGLWidget's destructor deletes the context after this widget's
+    // members are gone, and the context's aboutToBeDestroyed would then call
+    // back into the half-destroyed widget. Disconnect first.
+    if (QOpenGLContext *glContext = context()) {
+        disconnect(glContext, &QOpenGLContext::aboutToBeDestroyed,
+                   this, &FilterPreviewWidget::handleContextAboutToBeDestroyed);
+    }
+
     if (isValid()) {
         makeCurrent();
         cleanupGLResources();

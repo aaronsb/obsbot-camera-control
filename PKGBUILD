@@ -1,11 +1,13 @@
 # Maintainer: Aaron Bockelie <aaronsb@gmail.com>
 pkgname=obsbot-camera-control
-pkgver=1.3.0
+pkgver=1.4.0
 pkgrel=1
 pkgdesc="Native Linux control app for OBSBOT cameras with PTZ, auto-framing, presets, and live preview"
 arch=('x86_64')
 url="https://github.com/aaronsb/${pkgname}"
-license=('MIT')
+# MIT for this project's code; the rest for OBSBOT's libdev.so and the
+# components found inside it (see THIRD_PARTY_NOTICES).
+license=('MIT' 'LGPL-2.1-or-later' 'BSL-1.0' 'LicenseRef-OBSBOT-SDK')
 groups=('video')
 # Underscore-prefixed because keywords is not a PKGBUILD variable; namcap
 # reports any bare name it does not know as a non-standard one.
@@ -88,6 +90,8 @@ package() {
     # Install license
     install -Dm644 LICENSE \
         "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
+    install -Dm644 THIRD_PARTY_NOTICES \
+        "${pkgdir}/usr/share/licenses/${pkgname}/THIRD_PARTY_NOTICES"
 
     # Install documentation
     install -Dm644 README.md \

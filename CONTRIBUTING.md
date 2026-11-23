@@ -14,6 +14,8 @@ For a clean rebuild:
 ./build.sh build --confirm
 ```
 
+On NixOS, `nix build` and `nix run` automatically handle dependencies.
+
 ## Dependencies
 
 **Build**: cmake, make, gcc/g++, qt6-base, qt6-multimedia, pkg-config

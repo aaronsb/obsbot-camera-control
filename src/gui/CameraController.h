@@ -91,6 +91,9 @@ public:
     // State
     CameraState getCurrentState();
     bool hasTiny2Capabilities() const;
+    // True for models that track with a motorised gimbal (Tiny and Tail
+    // families). Meet-family cameras frame by digital zoom and crop instead.
+    bool hasGimbal() const;
 
     // Tracking controls
     bool enableAutoFraming(bool enabled);

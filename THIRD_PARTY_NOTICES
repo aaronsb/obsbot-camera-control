@@ -9,7 +9,7 @@ own interpretation. It is not provided, reviewed or endorsed by OBSBOT
 (Remo Tech Co., Ltd.), and it is not a representation by the authors of
 this project about the library's contents or licensing. It may be
 incomplete or wrong. The method and evidence are published at
-https://github.com/aaronsb/obsbotctl/tree/main/docs/compliance/
+https://github.com/aaronsb/libobsbot/tree/main/docs/compliance/
 
 The application's own source code is licensed under the MIT licence (see
 LICENSE). libdev.so is OBSBOT's software, not ours; we redistribute it

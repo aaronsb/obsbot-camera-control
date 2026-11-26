@@ -3,8 +3,6 @@
 #include <QDebug>
 #include <algorithm>
 
-static constexpr int kDefaultWhiteBalanceKelvin = 4800;
-
 CameraController::CameraController(QObject *parent)
     : QObject(parent)
     , m_connected(false)
@@ -124,6 +122,7 @@ void CameraController::connectSdkDevice(const std::shared_ptr<Device> &dev)
     m_cameraInfo.connected = true;
     refreshControlRanges();
     emit cameraConnected(m_cameraInfo);
+    applyConfigToCamera();
     updateState();
 }
 
@@ -216,10 +215,8 @@ void CameraController::connectV4l2(const std::string &devicePath)
 
     refreshV4l2ControlRanges();
 
-    m_v4l2.setWhiteBalanceAuto(false);
-    m_v4l2.setWhiteBalanceTemperature(kDefaultWhiteBalanceKelvin);
-
     emit cameraConnected(m_cameraInfo);
+    applyConfigToCamera();
     updateV4l2State();
 }
 
@@ -883,7 +880,8 @@ void CameraController::applyConfigToCamera()
     if (settings.focus >= 0) {
         setFocusAbsolute(settings.focus, false);
     } else {
-        setFocusAbsolute(0, true);
+        // Keep the manual position for when the user goes back to manual
+        setFocusAbsolute(m_currentState.manualFocusValue, true);
     }
 
     if (isTiny2Family()) {
